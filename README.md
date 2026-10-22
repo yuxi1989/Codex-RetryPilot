@@ -14,7 +14,7 @@
 
 一晚上被打断三四次，每次都得人肉点一下「重试」。Codex-RetryPilot 把「盯着重试按钮」这件事从你身上拿走——你挂你的机，它守你的会话。
 
-macOS 菜单栏应用，专为 Codex 桌面端设计，遇到 **"at capacity"** 错误时自动点击「重试」，无人值守持续恢复会话。不盲点、不抢你的鼠标、不打断你正在做的事。
+macOS 桌面应用，专为 Codex 桌面端设计，遇到 **"at capacity"** 错误时自动点击「重试」，无人值守持续恢复会话。不盲点、不抢你的鼠标、不打断你正在做的事。
 
 ### 功能特性
 
@@ -97,7 +97,7 @@ You kick off a long Codex task, go grab a coffee, and come back to find it stall
 
 Three or four interruptions a night, each one needing a manual click on "Retry". Codex-RetryPilot takes "watching the Retry button" off your hands — you run your tasks, it keeps your session alive.
 
-A macOS menu bar app built for the Codex desktop client. It detects **"at capacity"** errors and automatically clicks **"Retry"**, keeping your session alive unattended. No blind clicks, no stealing your mouse, no interrupting what you're doing.
+A macOS desktop app built for the Codex desktop client. It detects **"at capacity"** errors and automatically clicks **"Retry"**, keeping your session alive unattended. No blind clicks, no stealing your mouse, no interrupting what you're doing.
 
 ### Features
 
