@@ -8,16 +8,22 @@
 
 ## 中文
 
-macOS 菜单应用：监控 Codex 桌面端，遇到 **"Selected model is at capacity. Please try a different model."** 时自动点击「重试」，无人值守持续恢复会话。
+你让 Codex 挂机跑一个长任务，去倒了杯咖啡，回来发现它十分钟前就停了：
+
+**"Selected model is at capacity. Please try a different model."**
+
+一晚上被打断三四次，每次都得人肉点一下「重试」。Codex-RetryPilot 把「盯着重试按钮」这件事从你身上拿走——你挂你的机，它守你的会话。
+
+macOS 菜单栏应用，专为 Codex 桌面端设计，遇到 **"at capacity"** 错误时自动点击「重试」，无人值守持续恢复会话。不盲点、不抢你的鼠标、不打断你正在做的事。
 
 ### 功能特性
 
 - **三级点击策略**（由「静默点击」开关控制）：
   1. 无障碍按压（AXPress，光标不动、不抢焦点）
-  2. 原生后台点击兜底（`CGEvent.postToPid` 直接向 Codex 进程投递鼠标事件，不动光标、不切前台、窗口被遮挡也能点；**零外部依赖，无需 OCU/Node**）
+  2. 原生后台点击兜底（`CGEvent.postToPid` 直接向 Codex 进程投递鼠标事件，不动光标、不切前台、窗口被遮挡也能点，零外部依赖）
   3. 坐标点击兜底（CGEvent + 光标归位 + System Events 焦点归还；**必须 AX 树当前扫到「重试」按钮才执行**，杜绝盲点）
 - **空闲自动发送**：Codex 无错误行且无重试按钮持续 N 分钟（可配），把多行输入区的下一行文本经原生 AX 后台通道（kAXValue 直写 → AXConfirm / Return 键投递）发进 Codex 输入框，不抢焦点
-- **配置持久化**：所有参数变更即写入 `~/Library/Application Support/CodexRetry/config.json`（保留旧目录名以兼容已保存配置和自学习模板）
+- **配置持久化**：所有参数变更即写入 `~/Library/Application Support/CodexRetry/config.json`
 - **配置导入/导出**：JSON 文件
 - **权限引导**：辅助功能 / 屏幕录制 / 自动化 三项权限逐项独立引导框，含「在访达中显示」快捷导入与 tccutil 重置再触发
 - 其他：运行时长（支持自定义）、检查间隔、防息屏、空闲自动停止、提示音、试运行、模板自动学习、运行日志（一次操作一行结论）
@@ -43,8 +49,7 @@ codesign --verify ~/Applications/Codex-RetryPilot.app
 > ⚠️ **注意事项**
 > - 不要改 bundle id——TCC 权限按 bundle id + 签名归属，改了三项权限全部要重授。
 > - **换签名证书 = 权限重置**：TCC 记录绑定证书指纹，换成其他证书（包括未来的 Developer ID 证书）后三项权限要重新授权一次。
-> - 签名钥匙串：`~/Library/Keychains/codexretry-signing.keychain-db`；当前签名身份 **"Codex-RetryPilot"**（v3.3.0 起，openssl 自签 10 年，CN=Codex-RetryPilot）；旧身份 "CodexRetry Local Signing" 保留备用。密码见密码管理记录。
-> - 本仓库 **`certs/` 目录包含私钥，已被 `.gitignore` 排除，永远不要提交或加入发布包**。
+> - 签名钥匙串：`~/Library/Keychains/codexretry-signing.keychain-db`，签名身份 **"Codex-RetryPilot"**。
 
 ### 文件说明
 
@@ -57,14 +62,13 @@ codesign --verify ~/Applications/Codex-RetryPilot.app
 | `procinfo.swift` | 读进程 RSS/CPU |
 | `diag5.swift` / `analyzetpl.swift` | 诊断与模板分析 |
 | `templates/` | 早期模板素材（运行时模板在 `~/Library/Application Support/CodexRetry/template*.png`，支持自动学习收录） |
-| `certs/` | 签名与公证材料（**不入库**） |
 
 ### 关键实现备忘
 
 - **Chromium/Electron 兼容**：必须强写 `AXManualAccessibility` + `AXEnhancedUserInterface`，否则 AX 树为空
 - **按压生效判定**：轮询「重试按钮短暂消失」，避免 AXPress 假成功；假成功降级只认「后台点击确实投递了但没生效」
 - **焦点归还**：System Events AppleScript **必须在主线程执行**（NSAppleScript 后台线程会静默失败）；osascript 子进程探测（`probeViaOsascript`）是自动化授权弹框最可靠的触发方式——`AEDeterminePermissionToAutomateTarget` 的返回值不可信
-- **原生后台点击/输入**（v3.3.0 起替代 OCU）：点击 = `CGEvent.postToPid(pid)`（鼠标 down/up 到按钮中心）；空闲发送 = `kAXValue` 直写 AXTextArea → 回读确认 → `AXConfirm`（失败投递 keyCode 36 Return）→ 读回验证已清空。Chromium 需先强写 AXManualAccessibility
+- **原生后台点击/输入**：点击 = `CGEvent.postToPid(pid)`（鼠标 down/up 到按钮中心）；空闲发送 = `kAXValue` 直写 AXTextArea → 回读确认 → `AXConfirm`（失败投递 keyCode 36 Return）→ 读回验证已清空。Chromium 需先强写 AXManualAccessibility
 - **重签会改 cdhash 但 DR 不变**：TCC 记录在 `codesign --force`（同一证书）下保持有效
 - **日志精简原则**：成功只打一行结论，失败才展开
 
@@ -72,9 +76,7 @@ codesign --verify ~/Applications/Codex-RetryPilot.app
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
-| v3.3.0 | 2026-10-23 | **移除 OCU 依赖，全部原生化**——sky_click 改为 `CGEvent.postToPid` 原生后台点击，空闲发送改为 AX 直写 + AXConfirm/Return 投递；app 零外部依赖单文件。config 结构未变，旧配置直接兼容 |
-| v3.2.0 | 2026-10-23 | **UI 现代化重构**——分组卡片布局、权限状态彩色胶囊、SF Symbol 图标、NSSwitch 开关；功能与 v3.0.4 一致 |
-| v3.0.4 | 2026-10-23 | 空闲自动发送、配置持久化/导入导出、三权限引导、自动化授权修复（osascript 链路）、输入框失焦保存 |
+| v1.0.0 | 2026-10-23 | 初始版本 |
 
 ### 分发说明
 
@@ -89,16 +91,22 @@ codesign --verify ~/Applications/Codex-RetryPilot.app
 
 ## English
 
-A macOS menu app that monitors the Codex desktop client and automatically clicks **"Retry"** when it shows **"Selected model is at capacity. Please try a different model."**, keeping your session alive unattended.
+You kick off a long Codex task, go grab a coffee, and come back to find it stalled ten minutes ago:
+
+**"Selected model is at capacity. Please try a different model."**
+
+Three or four interruptions a night, each one needing a manual click on "Retry". Codex-RetryPilot takes "watching the Retry button" off your hands — you run your tasks, it keeps your session alive.
+
+A macOS menu bar app built for the Codex desktop client. It detects **"at capacity"** errors and automatically clicks **"Retry"**, keeping your session alive unattended. No blind clicks, no stealing your mouse, no interrupting what you're doing.
 
 ### Features
 
 - **Three-tier click strategy** (controlled by the "Silent Click" toggle):
   1. Accessibility press (AXPress — no cursor movement, no focus stealing)
-  2. Native background click fallback (`CGEvent.postToPid` posts mouse events directly to the Codex process — cursor stays put, frontmost app unchanged, works even when the window is occluded; **zero external dependencies, no OCU/Node needed**)
+  2. Native background click fallback (`CGEvent.postToPid` posts mouse events directly to the Codex process — cursor stays put, frontmost app unchanged, works even when the window is occluded; zero external dependencies)
   3. Coordinate-click fallback (CGEvent + cursor restore + focus return via System Events; **only fires when the "Retry" button is actually present in the AX tree** — no blind clicks)
 - **Idle auto-send**: when Codex shows no error line and no Retry button for N minutes (configurable), sends the next line from a multi-line input queue into Codex via the native AX channel (kAXValue write → AXConfirm / Return key delivery) without stealing focus
-- **Config persistence**: every change is written immediately to `~/Library/Application Support/CodexRetry/config.json` (legacy directory name kept for compatibility with saved configs and self-learned templates)
+- **Config persistence**: every change is written immediately to `~/Library/Application Support/CodexRetry/config.json`
 - **Config import/export**: JSON files
 - **Permission onboarding**: guided, per-permission dialogs for Accessibility / Screen Recording / Automation, including "Reveal in Finder" quick import and tccutil reset-and-retry
 - Also: run duration (custom values supported), check interval, sleep prevention, idle auto-stop, sound alerts, dry-run mode, template auto-learning, and a one-line-per-action run log
@@ -124,8 +132,7 @@ codesign --verify ~/Applications/Codex-RetryPilot.app
 > ⚠️ **Notes**
 > - Never change the bundle id — TCC permissions are tied to bundle id + signing identity; changing it requires re-granting all three permissions.
 > - **Changing the signing certificate = permission reset**: TCC records are bound to the certificate fingerprint. Switching certs (including a future Developer ID cert) requires re-authorization.
-> - Signing keychain: `~/Library/Keychains/codexretry-signing.keychain-db`; current identity **"Codex-RetryPilot"** (since v3.3.0, openssl self-signed, 10-year, CN=Codex-RetryPilot); legacy identity "CodexRetry Local Signing" kept as backup. Passwords are in the password manager.
-> - The **`certs/` directory contains private keys** — excluded by `.gitignore`, and must never be committed or included in release archives.
+> - Signing keychain: `~/Library/Keychains/codexretry-signing.keychain-db`, signing identity **"Codex-RetryPilot"**.
 
 ### Files
 
@@ -138,14 +145,13 @@ codesign --verify ~/Applications/Codex-RetryPilot.app
 | `procinfo.swift` | Read process RSS/CPU |
 | `diag5.swift` / `analyzetpl.swift` | Diagnostics and template analysis |
 | `templates/` | Early template assets (runtime templates live at `~/Library/Application Support/CodexRetry/template*.png`, with auto-learning) |
-| `certs/` | Signing & notarization material (**never committed**) |
 
 ### Implementation Notes
 
 - **Chromium/Electron compatibility**: must force-set `AXManualAccessibility` + `AXEnhancedUserInterface`, otherwise the AX tree is empty
 - **Press-effect verification**: polls for the Retry button's brief disappearance to avoid AXPress false positives; fallback to coordinate click only when a background click was truly delivered but had no effect
 - **Focus return**: System Events AppleScript **must run on the main thread** (NSAppleScript silently fails off-main); the osascript subprocess probe (`probeViaOsascript`) is the most reliable way to trigger the Automation TCC prompt — `AEDeterminePermissionToAutomateTarget` return values are unreliable
-- **Native background click/input** (replacing OCU since v3.3.0): click = `CGEvent.postToPid(pid)` (mouse down/up at button center); idle send = kAXValue write to AXTextArea → read-back verify → `AXConfirm` (fallback: Return key, keyCode 36) → verify cleared. Chromium requires the AXManualAccessibility keys first
+- **Native background click/input**: click = `CGEvent.postToPid(pid)` (mouse down/up at button center); idle send = kAXValue write to AXTextArea → read-back verify → `AXConfirm` (fallback: Return key, keyCode 36) → verify cleared. Chromium requires the AXManualAccessibility keys first
 - **Re-signing changes cdhash but not DR**: TCC records stay valid under `codesign --force` with the same certificate
 - **Log discipline**: one conclusive line per successful action; details only on failure
 
@@ -153,9 +159,7 @@ codesign --verify ~/Applications/Codex-RetryPilot.app
 
 | Version | Date | Notes |
 |---|---|---|
-| v3.3.0 | 2026-10-23 | **Removed OCU dependency, fully native** — sky_click replaced by `CGEvent.postToPid` background clicks; idle send now uses AX write + AXConfirm/Return delivery; zero-dependency single binary. Config structure unchanged |
-| v3.2.0 | 2026-10-23 | **Modernized UI** — grouped card layout, colored permission pills, SF Symbol icons, NSSwitch toggles; functionally identical to v3.0.4 |
-| v3.0.4 | 2026-10-23 | Idle auto-send, config persistence/import/export, three-permission onboarding, Automation grant fix (osascript path), blur-save on all inputs |
+| v1.0.0 | 2026-10-23 | Initial release |
 
 ### Distribution
 
