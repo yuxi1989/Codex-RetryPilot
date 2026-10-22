@@ -1,0 +1,26 @@
+# 证书与私钥 —— 绝不入库
+certs/
+*.p12
+*.p8
+*.pem
+*.csr
+*.cer
+*.key
+*.keychain-db
+codexretry-signing.keychain*
+
+# 构建产物
+build/
+*.o
+*.app
+*.dmg
+*.zip
+
+# SwiftPM / Xcode
+.build/
+DerivedData/
+*.xcodeproj/xcuserdata/
+
+# 系统与编辑器
+.DS_Store
+*.swp
