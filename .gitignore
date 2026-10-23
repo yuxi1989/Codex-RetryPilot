@@ -25,3 +25,6 @@ DerivedData/
 # 系统与编辑器
 .DS_Store
 *.swp
+
+# 本地发版脚本（含签名身份与公证凭据信息，只留本机，不入库）
+scripts/release.sh
