@@ -1,6 +1,14 @@
 # Codex-RetryPilot
 
-[中文](#中文) | [English](#english)
+> **无用到有用，只差每天一点。**
+
+**Codex 卡住了？让 RetryPilot 替你点「重试」。**
+
+让 Codex 自动应对模型繁忙，告别反复手动重试。任务继续跑，你该干什么就干什么。
+
+**自动重试 · 后台静默 · 无人值守 · 完全开源**
+
+[中文](#中文) | [English](#english) | [下载安装](https://github.com/yuxi1989/Codex-RetryPilot/releases) | [MIT License](LICENSE)
 
 ---
 
@@ -8,82 +16,109 @@
 
 ## 中文
 
-你让 Codex 挂机跑一个长任务，去倒了杯咖啡，回来发现它十分钟前就停了：
+### 你负责创造，它负责重试
 
-**"Selected model is at capacity. Please try a different model."**
+给 Codex 安排了一个长任务，转头去喝杯咖啡，回来却发现它早就停在了：
 
-一晚上被打断三四次，每次都得人肉点一下「重试」。Codex-RetryPilot 把「盯着重试按钮」这件事从你身上拿走——你挂你的机，它守你的会话。
+**Selected model is at capacity. Please try a different model.**
 
-macOS 桌面应用，专为 Codex 桌面端设计，遇到 **"at capacity"** 错误时自动点击「重试」，无人值守持续恢复会话。不盲点、不抢你的鼠标、不打断你正在做的事。
+![Codex 反复弹出 at capacity 错误](docs/codex-at-capacity.png)
 
-### 功能特性
+更糟的是，半夜任务跑到一半卡住，第二天才发现几个小时白白浪费了。
 
-- **三级点击策略**（由「静默点击」开关控制）：
-  1. 无障碍按压（AXPress，光标不动、不抢焦点）
-  2. 原生后台点击兜底（`CGEvent.postToPid` 直接向 Codex 进程投递鼠标事件，不动光标、不切前台、窗口被遮挡也能点，零外部依赖）
-  3. 坐标点击兜底（CGEvent + 光标归位 + System Events 焦点归还；**必须 AX 树当前扫到「重试」按钮才执行**，杜绝盲点）
-- **空闲自动发送**：Codex 无错误行且无重试按钮持续 N 分钟（可配），把多行输入区的下一行文本经原生 AX 后台通道（kAXValue 直写 → AXConfirm / Return 键投递）发进 Codex 输入框，不抢焦点
-- **配置持久化**：所有参数变更即写入 `~/Library/Application Support/CodexRetry/config.json`
-- **配置导入/导出**：JSON 文件
-- **权限引导**：辅助功能 / 屏幕录制 / 自动化 三项权限逐项独立引导框，含「在访达中显示」快捷导入与 tccutil 重置再触发
-- 其他：运行时长（支持自定义）、检查间隔、防息屏、空闲自动停止、提示音、试运行、模板自动学习、运行日志（一次操作一行结论）
+**Codex-RetryPilot 就是为了解决这个小麻烦而生。** 它会自动检测 Codex 的模型容量限制错误，找到「重试」按钮并替你点击。无需守着屏幕，也不用反复手动操作。
 
-### 构建与安装
+### 一个小工具，解决一个烦人的问题
+
+![Codex-RetryPilot 运行界面](docs/app-running.png)
+
+- **自动重试**：检测到模型容量限制错误，自动寻找并点击「重试」。
+- **静默后台**：优先使用不移动鼠标、不抢占焦点的方式操作。
+- **无人值守**：自定义检测间隔、运行时长，让长任务持续等待恢复。
+- **智能验证**：点击后检查按钮状态，减少误判和无效操作。
+- **指令接力**：Codex 持续空闲达到指定时间后，自动发送指令队列中的下一条。
+- **安全可控**：提供运行日志、自动停止、提示音及配置导入导出。
+
+### 下载与安装
+
+**无需自己编译，下载 Release 安装包即可使用。**
+
+[前往 GitHub Releases 下载最新版本](https://github.com/yuxi1989/Codex-RetryPilot/releases)
+
+1. 打开 Releases 页面，下载适用于 macOS 的 `.dmg` 或 `.zip` 安装包。
+2. `.dmg` 直接打开后把应用拖进「应用程序」；`.zip` 解压后把 `.app` 拖进「应用程序」。
+3. 首次启动应用，按提示完成授权。
+4. 打开 Codex 桌面客户端。
+5. 在 RetryPilot 里设置检测间隔、运行时长，点开始运行。
+
+首次使用需要以下权限：
+
+| 系统权限 | 用途 |
+|---|---|
+| 辅助功能（必需） | 识别并点击 Codex 的重试按钮 |
+| 屏幕录制（必需） | 截图并识别目标界面 |
+| 自动化（可选） | 兼容模式下恢复原应用焦点 |
+
+如果 macOS 阻止启动，请先检查应用签名与系统安全提示，不建议为了安装而全局关闭 Gatekeeper。Release 页面还没有安装包时，可以按下方「从源码构建」自行编译。
+
+### 安静工作，不打扰你
+
+RetryPilot 提供两种重试模式。
+
+**静默模式（默认）**：优先通过辅助功能和原生后台点击触发重试，不主动移动鼠标或切换焦点。适合日常使用。
+
+**兼容模式**：增加坐标点击兜底。只有确认当前界面存在目标「重试」按钮时才允许点击，并尝试恢复原来的应用焦点。
+
+无论哪种模式，都不会绕过 Codex 的模型容量限制。工具负责自动尝试恢复，实际能否继续执行仍取决于 Codex 服务状态。
+
+### 纯本地运行，简单透明
+
+**不联网、不注册、不上传数据。**
+
+- 无远程服务依赖
+- 无遥测统计和自动更新检查
+- 无需 API Key
+- 不上传 Codex 会话、截图或日志
+- 本地保存配置，支持 JSON 导入导出
+- Swift 原生实现，无第三方依赖
+
+程序需要使用 macOS 的辅助功能和屏幕录制权限，请根据实际需求授权。
+
+### 系统要求
+
+- macOS 13 Ventura 或更高版本（推荐 macOS 14 Sonoma 及以上）
+- Apple Silicon / Intel Mac
+- Codex 桌面客户端
+
+### 从源码构建
+
+项目核心代码为单个 `main.swift`，无需第三方依赖。需要安装 Xcode Command Line Tools。
 
 ```bash
-# 编译（SDK 路径必需）
 cd <项目目录>
 export SDKROOT=$(xcrun --show-sdk-path)
-xcrun swiftc -O main.swift -o /tmp/CodexRetry-new
-
-# 安装（bundle id 保持 com.zhuxiaoyu.codexretry 以保留 TCC 授权）
-cp /tmp/CodexRetry-new ~/Applications/Codex-RetryPilot.app/Contents/MacOS/CodexRetry
-
-# 签名（自签证书 "Codex-RetryPilot"，同一证书重签权限保持稳定）
-codesign --force --sign "Codex-RetryPilot" \
-  --keychain ~/Library/Keychains/codexretry-signing.keychain-db \
-  ~/Applications/Codex-RetryPilot.app
-codesign --verify ~/Applications/Codex-RetryPilot.app
+xcrun swiftc -O main.swift -o CodexRetry
 ```
 
-> ⚠️ **注意事项**
-> - 不要改 bundle id——TCC 权限按 bundle id + 签名归属，改了三项权限全部要重授。
-> - **换签名证书 = 权限重置**：TCC 记录绑定证书指纹，换成其他证书（包括未来的 Developer ID 证书）后三项权限要重新授权一次。
-> - 签名钥匙串：`~/Library/Keychains/codexretry-signing.keychain-db`，签名身份 **"Codex-RetryPilot"**。
+如需生成可分发的 `.app` 或 `.dmg`，还需要完成应用打包和代码签名。
 
-### 文件说明
+### 为什么做这个工具？
 
-| 文件 | 用途 |
-|---|---|
-| `main.swift` | 应用主体（AppKit 单文件） |
-| `readlog.swift` | 经 AX 读取运行中 app 的窗口日志（窗口被遮挡时排错用） |
-| `startviaax.swift` | 经 AX 点击「开始监控」 |
-| `focustest.swift` | 焦点测量（验证点击前后前台变化） |
-| `procinfo.swift` | 读进程 RSS/CPU |
-| `diag5.swift` / `analyzetpl.swift` | 诊断与模板分析 |
-| `templates/` | 早期模板素材（运行时模板在 `~/Library/Application Support/CodexRetry/template*.png`，支持自动学习收录） |
+因为 Codex 很能干，但偶尔也会罢工。一个简单的模型繁忙提示，不应该让几个小时的任务停在那里等人处理。
 
-### 关键实现备忘
+于是有了 RetryPilot。它不是什么复杂的软件，只是替你做一件重复又烦人的事：**当 Codex 卡住时，帮你再试一次。**
 
-- **Chromium/Electron 兼容**：必须强写 `AXManualAccessibility` + `AXEnhancedUserInterface`，否则 AX 树为空
-- **按压生效判定**：轮询「重试按钮短暂消失」，避免 AXPress 假成功；假成功降级只认「后台点击确实投递了但没生效」
-- **焦点归还**：System Events AppleScript **必须在主线程执行**（NSAppleScript 后台线程会静默失败）；osascript 子进程探测（`probeViaOsascript`）是自动化授权弹框最可靠的触发方式——`AEDeterminePermissionToAutomateTarget` 的返回值不可信
-- **原生后台点击/输入**：点击 = `CGEvent.postToPid(pid)`（鼠标 down/up 到按钮中心）；空闲发送 = `kAXValue` 直写 AXTextArea → 回读确认 → `AXConfirm`（失败投递 keyCode 36 Return）→ 读回验证已清空。Chromium 需先强写 AXManualAccessibility
-- **重签会改 cdhash 但 DR 不变**：TCC 记录在 `codesign --force`（同一证书）下保持有效
-- **日志精简原则**：成功只打一行结论，失败才展开
+整个项目由 WorkBuddy 辅助开发，没有手写过一行代码。
 
-### 版本历史
+**无用到有用，只差每天一点。**
 
-| 版本 | 日期 | 说明 |
-|---|---|---|
-| v1.0.0 | 2026-10-23 | 初始版本 |
+### 开源协议
 
-### 分发说明
+本项目采用 **MIT License** 开源。
 
-- 自签 / Developer ID 签名后经 GitHub 分发均**不违反 Apple 协议**（macOS 允许 App Store 外分发）。
-- 自签版本：用户首次打开需右键 →「打开」，或 `xattr -cr Codex-RetryPilot.app` 去除隔离属性。
-- Developer ID + 公证版本：可直接双击打开（需 Apple Developer Program，$99/年）。
-- **禁止使用 Enterprise 证书公开分发**（违反协议，证书会被吊销）。
+欢迎自由使用、修改和分发，也欢迎提交 Issue 和 Pull Request。
+
+GitHub：[yuxi1989/Codex-RetryPilot](https://github.com/yuxi1989/Codex-RetryPilot)
 
 ---
 
@@ -91,79 +126,94 @@ codesign --verify ~/Applications/Codex-RetryPilot.app
 
 ## English
 
-You kick off a long Codex task, go grab a coffee, and come back to find it stalled ten minutes ago:
+> **From useless to useful — just a little every day.**
 
-**"Selected model is at capacity. Please try a different model."**
+**Codex stuck? Let RetryPilot hit Retry for you.**
 
-Three or four interruptions a night, each one needing a manual click on "Retry". Codex-RetryPilot takes "watching the Retry button" off your hands — you run your tasks, it keeps your session alive.
+Stop babysitting Codex when models are at capacity. Let your tasks keep moving while you focus on something else.
 
-A macOS desktop app built for the Codex desktop client. It detects **"at capacity"** errors and automatically clicks **"Retry"**, keeping your session alive unattended. No blind clicks, no stealing your mouse, no interrupting what you're doing.
+**Auto Retry · Silent Background · Unattended · Open Source**
 
-### Features
+### You create, it retries
 
-- **Three-tier click strategy** (controlled by the "Silent Click" toggle):
-  1. Accessibility press (AXPress — no cursor movement, no focus stealing)
-  2. Native background click fallback (`CGEvent.postToPid` posts mouse events directly to the Codex process — cursor stays put, frontmost app unchanged, works even when the window is occluded; zero external dependencies)
-  3. Coordinate-click fallback (CGEvent + cursor restore + focus return via System Events; **only fires when the "Retry" button is actually present in the AX tree** — no blind clicks)
-- **Idle auto-send**: when Codex shows no error line and no Retry button for N minutes (configurable), sends the next line from a multi-line input queue into Codex via the native AX channel (kAXValue write → AXConfirm / Return key delivery) without stealing focus
-- **Config persistence**: every change is written immediately to `~/Library/Application Support/CodexRetry/config.json`
-- **Config import/export**: JSON files
-- **Permission onboarding**: guided, per-permission dialogs for Accessibility / Screen Recording / Automation, including "Reveal in Finder" quick import and tccutil reset-and-retry
-- Also: run duration (custom values supported), check interval, sleep prevention, idle auto-stop, sound alerts, dry-run mode, template auto-learning, and a one-line-per-action run log
+You start a long-running Codex task, grab a coffee, and return to find:
 
-### Build & Install
+**Selected model is at capacity. Please try a different model.**
+
+![Codex hitting the at capacity error repeatedly](docs/codex-at-capacity.png)
+
+Codex-RetryPilot detects this error, finds the Retry button, and automatically attempts to resume your session. No constant checking. No repetitive clicking.
+
+### One small tool. One annoying problem solved.
+
+![Codex-RetryPilot running](docs/app-running.png)
+
+- **Auto Retry** — Detect model capacity errors and automatically trigger Retry.
+- **Silent Background** — Prioritize interactions that do not move your cursor or steal focus.
+- **Unattended Operation** — Configure monitoring intervals and run duration.
+- **Retry Verification** — Check button state after each attempt.
+- **Command Queue** — Automatically send the next instruction after a configurable idle period.
+- **Simple Controls** — Logs, idle auto-stop, sound notifications, and JSON configuration import/export.
+
+### Download & Install
+
+[Download from GitHub Releases](https://github.com/yuxi1989/Codex-RetryPilot/releases)
+
+1. Download the macOS `.dmg` or `.zip` release asset.
+2. Drag the app into your Applications folder.
+3. Launch the app and grant the required macOS permissions.
+4. Open the Codex desktop client.
+5. Configure RetryPilot and start monitoring.
+
+Required permissions: Accessibility and Screen Recording. Automation is optional. If no release asset is available yet, build from source as described below.
+
+### Two retry modes
+
+**Silent (default)** — triggers Retry through accessibility and native background clicks, without moving your cursor or stealing focus.
+
+**Compatible** — adds a coordinate-click fallback. It only fires when the target Retry button is confirmed on screen, and then restores focus to your previous app.
+
+Neither mode bypasses Codex model capacity limits. The app retries automatically; whether your task resumes still depends on Codex service availability.
+
+### Privacy First
+
+**No network, no account, no data collection.**
+
+- Fully local operation
+- No telemetry or automatic update checks
+- No accounts or API keys
+- No uploaded conversation data, screenshots, or logs
+- Local configuration storage with JSON import/export
+- Native Swift implementation with no third-party dependencies
+
+### Requirements
+
+macOS 13 Ventura or later (14 Sonoma+ recommended), Apple Silicon or Intel, and the Codex desktop client.
+
+### Build from Source
+
+Install Xcode Command Line Tools, then run:
 
 ```bash
-# Compile (SDK path required)
 cd <project-dir>
 export SDKROOT=$(xcrun --show-sdk-path)
-xcrun swiftc -O main.swift -o /tmp/CodexRetry-new
-
-# Install (keep bundle id com.zhuxiaoyu.codexretry to preserve TCC grants)
-cp /tmp/CodexRetry-new ~/Applications/Codex-RetryPilot.app/Contents/MacOS/CodexRetry
-
-# Sign (self-signed cert "Codex-RetryPilot"; re-signing with the same cert keeps TCC grants)
-codesign --force --sign "Codex-RetryPilot" \
-  --keychain ~/Library/Keychains/codexretry-signing.keychain-db \
-  ~/Applications/Codex-RetryPilot.app
-codesign --verify ~/Applications/Codex-RetryPilot.app
+xcrun swiftc -O main.swift -o CodexRetry
 ```
 
-> ⚠️ **Notes**
-> - Never change the bundle id — TCC permissions are tied to bundle id + signing identity; changing it requires re-granting all three permissions.
-> - **Changing the signing certificate = permission reset**: TCC records are bound to the certificate fingerprint. Switching certs (including a future Developer ID cert) requires re-authorization.
-> - Signing keychain: `~/Library/Keychains/codexretry-signing.keychain-db`, signing identity **"Codex-RetryPilot"**.
+Application packaging and code signing are additional steps for distribution.
 
-### Files
+### Why RetryPilot?
 
-| File | Purpose |
-|---|---|
-| `main.swift` | Main app (single-file AppKit) |
-| `readlog.swift` | Read the running app's on-window log via AX (for debugging when occluded) |
-| `startviaax.swift` | Click "Start Monitoring" via AX |
-| `focustest.swift` | Focus measurement (verify frontmost-app changes around clicks) |
-| `procinfo.swift` | Read process RSS/CPU |
-| `diag5.swift` / `analyzetpl.swift` | Diagnostics and template analysis |
-| `templates/` | Early template assets (runtime templates live at `~/Library/Application Support/CodexRetry/template*.png`, with auto-learning) |
+Because Codex is capable, but sometimes it stops working. A temporary capacity error should not park hours of work waiting for a human.
 
-### Implementation Notes
+So RetryPilot exists. It is not complicated software — it just does one repetitive, annoying thing for you: **when Codex gets stuck, it tries again.**
 
-- **Chromium/Electron compatibility**: must force-set `AXManualAccessibility` + `AXEnhancedUserInterface`, otherwise the AX tree is empty
-- **Press-effect verification**: polls for the Retry button's brief disappearance to avoid AXPress false positives; fallback to coordinate click only when a background click was truly delivered but had no effect
-- **Focus return**: System Events AppleScript **must run on the main thread** (NSAppleScript silently fails off-main); the osascript subprocess probe (`probeViaOsascript`) is the most reliable way to trigger the Automation TCC prompt — `AEDeterminePermissionToAutomateTarget` return values are unreliable
-- **Native background click/input**: click = `CGEvent.postToPid(pid)` (mouse down/up at button center); idle send = kAXValue write to AXTextArea → read-back verify → `AXConfirm` (fallback: Return key, keyCode 36) → verify cleared. Chromium requires the AXManualAccessibility keys first
-- **Re-signing changes cdhash but not DR**: TCC records stay valid under `codesign --force` with the same certificate
-- **Log discipline**: one conclusive line per successful action; details only on failure
+Built entirely with WorkBuddy, without manually writing a single line of code.
 
-### Version History
+**From useless to useful — just a little every day.**
 
-| Version | Date | Notes |
-|---|---|---|
-| v1.0.0 | 2026-10-23 | Initial release |
+### License
 
-### Distribution
+Released under the **MIT License** — free to use, modify, and distribute under its terms.
 
-- Distributing via GitHub after self-signing or Developer ID signing is **fully compliant** with Apple's terms (macOS allows distribution outside the App Store).
-- Self-signed builds: users must right-click → "Open" on first launch, or clear quarantine with `xattr -cr Codex-RetryPilot.app`.
-- Developer ID + notarized builds: open directly by double-click (requires Apple Developer Program, $99/year).
-- **Never distribute publicly with an Enterprise certificate** (violates the agreement; the cert will be revoked).
+[GitHub Repository](https://github.com/yuxi1989/Codex-RetryPilot)

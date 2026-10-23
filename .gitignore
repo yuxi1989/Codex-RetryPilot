@@ -10,6 +10,7 @@ certs/
 codexretry-signing.keychain*
 
 # 构建产物
+dist/
 build/
 *.o
 *.app
