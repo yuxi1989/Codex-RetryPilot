@@ -13,6 +13,11 @@
 
 [中文介绍](#中文) · [English](#english) · [下载最新版本](https://github.com/yuxi1989/Codex-RetryPilot/releases) · [MIT License](LICENSE)
 
+![Codex-RetryPilot 自动重试演示](docs/demo.gif)
+
+*真实录屏：左侧 Codex 弹出 at capacity，右侧自动点击「重试」，错误被清除。*  
+*Real recording: Codex hits "at capacity" on the left, Retry is clicked automatically on the right.*
+
 </div>
 
 ---
