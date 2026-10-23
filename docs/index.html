@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Codex-RetryPilot — Codex 卡住时，替你点「重试」</title>
+<meta name="description" content="Codex-RetryPilot 是 macOS 小工具：Codex 出现 Selected model is at capacity 时自动找到并点击「重试」。不移动光标、不抢焦点、完全离线，MIT 开源。">
+<link rel="icon" href="app-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Codex-RetryPilot — Codex 卡住时，替你点「重试」">
+<meta property="og:description" content="检测 model at capacity 错误并自动点击重试。静默后台、无人值守、完全离线，MIT 开源。">
+<meta property="og:image" content="https://yuxi1989.github.io/Codex-RetryPilot/app-running.png">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+  :root{
+    --bg:#ffffff;
+    --bg-soft:#f6f7fb;
+    --bg-card:#ffffff;
+    --ink:#0d1117;
+    --ink-2:#39404d;
+    --muted:#5f6b7c;
+    --line:#e5e8ef;
+    --line-strong:#d3d8e3;
+    --accent:#2f6bff;
+    --accent-soft:#eaf0ff;
+    --code-bg:#f3f4f8;
+    --shadow:0 24px 60px -24px rgba(16,24,40,.30);
+    --radius:16px;
+    --max:1040px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0b0e14;
+      --bg-soft:#0f131b;
+      --bg-card:#121722;
+      --ink:#f2f5fa;
+      --ink-2:#c6cede;
+      --muted:#8e9aae;
+      --line:#222a38;
+      --line-strong:#2e384a;
+      --accent:#6c95ff;
+      --accent-soft:#17233d;
+      --code-bg:#161c27;
+      --shadow:0 24px 60px -24px rgba(0,0,0,.7);
+    }
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font:16px/1.7 -apple-system,BlinkMacSystemFont,"SF Pro SC","SF Pro Text","PingFang SC","Helvetica Neue",Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:var(--max);margin:0 auto;padding:0 24px}
+  header.nav{
+    position:sticky;top:0;z-index:20;
+    backdrop-filter:saturate(180%) blur(14px);
+    -webkit-backdrop-filter:saturate(180%) blur(14px);
+    background:color-mix(in srgb, var(--bg) 82%, transparent);
+    border-bottom:1px solid var(--line);
+  }
+  .nav-in{display:flex;align-items:center;gap:16px;height:60px;max-width:var(--max);margin:0 auto;padding:0 24px}
+  .brand{display:flex;align-items:center;gap:9px;font-weight:650;letter-spacing:-.01em;color:var(--ink)}
+  .brand svg{width:22px;height:22px;color:var(--accent)}
+  .nav-links{display:flex;gap:20px;margin-left:auto;font-size:14px}
+  .nav-links a{color:var(--muted);text-decoration:none}
+  .nav-links a:hover{color:var(--ink)}
+  .lang{display:flex;border:1px solid var(--line-strong);border-radius:999px;overflow:hidden;font-size:12.5px}
+  .lang button{
+    appearance:none;border:0;background:transparent;color:var(--muted);
+    padding:5px 11px;cursor:pointer;font:inherit;line-height:1.2;
+  }
+  .lang button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:8px;
+    height:46px;padding:0 22px;border-radius:999px;
+    font-weight:600;font-size:15px;text-decoration:none;
+    border:1px solid transparent;transition:transform .16s ease, box-shadow .16s ease, background .16s ease;
+  }
+  .btn:hover{text-decoration:none;transform:translateY(-1px)}
+  .btn-primary{background:var(--ink);color:var(--bg);box-shadow:0 10px 24px -12px rgba(13,17,23,.55)}
+  .btn-ghost{border-color:var(--line-strong);color:var(--ink);background:var(--bg-card)}
+  .btn-sm{height:36px;padding:0 15px;font-size:13.5px;border-radius:999px}
+
+  .hero{padding:84px 0 20px;text-align:center;position:relative;overflow:hidden}
+  .hero:before{
+    content:"";position:absolute;inset:-40% 20% auto 20%;height:520px;
+    background:radial-gradient(ellipse at center, var(--accent-soft), transparent 70%);
+    filter:blur(20px);opacity:.9;pointer-events:none;
+  }
+  .hero > *{position:relative}
+  .eyebrow{
+    display:inline-flex;align-items:center;gap:8px;
+    font-size:12.5px;letter-spacing:.02em;color:var(--muted);
+    border:1px solid var(--line);background:var(--bg-card);
+    padding:5px 12px;border-radius:999px;margin-bottom:22px;
+  }
+  .dot{width:6px;height:6px;border-radius:50%;background:#2bb673;box-shadow:0 0 0 3px rgba(43,182,115,.16)}
+  h1{
+    font-size:clamp(34px,5.4vw,58px);line-height:1.1;letter-spacing:-.03em;
+    margin:0 0 18px;font-weight:700;
+  }
+  h1 em{font-style:normal;background:linear-gradient(96deg,var(--accent),#9a6bff 80%);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .lede{font-size:clamp(16px,1.9vw,19px);color:var(--ink-2);max-width:660px;margin:0 auto 26px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:0 0 30px;padding:0;list-style:none}
+  .chips li{
+    font-size:13px;color:var(--ink-2);background:var(--bg-soft);
+    border:1px solid var(--line);border-radius:999px;padding:5px 12px;
+  }
+  .cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+  .meta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;color:var(--muted);font-size:13px;margin-top:20px}
+  .meta span{display:inline-flex;align-items:center;gap:6px}
+  .meta svg{width:14px;height:14px;opacity:.75}
+
+  .frame{
+    margin:52px auto 0;max-width:920px;
+    border:1px solid var(--line);border-radius:14px;overflow:hidden;
+    background:var(--bg-card);box-shadow:var(--shadow);
+  }
+  .frame-bar{
+    display:flex;align-items:center;gap:7px;height:34px;padding:0 13px;
+    background:var(--code-bg);border-bottom:1px solid var(--line);
+  }
+  .frame-bar i{width:10px;height:10px;border-radius:50%;background:var(--line-strong);display:block}
+  .frame-bar span{margin-left:8px;font-size:11.5px;color:var(--muted);letter-spacing:.01em}
+  .frame img{display:block;width:100%;height:auto}
+  .caption{color:var(--muted);font-size:13px;text-align:center;margin:14px auto 0;max-width:640px}
+
+  section{padding:76px 0;border-top:1px solid var(--line)}
+  section.soft{background:var(--bg-soft);border-top:1px solid var(--line)}
+  .kicker{font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin:0 0 12px}
+  h2{font-size:clamp(24px,3.2vw,34px);line-height:1.25;letter-spacing:-.022em;margin:0 0 16px;font-weight:680}
+  h3{font-size:17px;margin:0 0 8px;letter-spacing:-.01em;font-weight:650}
+  p{margin:0 0 16px}
+  .dim{color:var(--muted)}
+  .center{text-align:center}
+  .narrow{max-width:680px;margin-left:auto;margin-right:auto}
+
+  blockquote.err{
+    margin:26px 0;padding:18px 20px;border-radius:12px;
+    background:var(--code-bg);border:1px solid var(--line);
+    font:14.5px/1.5 ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
+    color:var(--ink-2);overflow-x:auto;
+  }
+  blockquote.err b{color:#d24a4a;font-weight:600}
+
+  .grid{display:grid;gap:16px}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g2{grid-template-columns:repeat(2,1fr)}
+  .card{
+    background:var(--bg-card);border:1px solid var(--line);border-radius:var(--radius);
+    padding:22px 22px 20px;transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+  }
+  .card:hover{transform:translateY(-2px);box-shadow:0 18px 40px -26px rgba(16,24,40,.5);border-color:var(--line-strong)}
+  .card p{margin:0;color:var(--muted);font-size:14.5px}
+  .ico{
+    width:34px;height:34px;border-radius:10px;display:grid;place-items:center;
+    background:var(--accent-soft);color:var(--accent);margin-bottom:14px;
+  }
+  .ico svg{width:18px;height:18px}
+
+  .tiers{list-style:none;margin:0;padding:0;display:grid;gap:2px}
+  .tiers li{
+    display:grid;grid-template-columns:44px 1fr;gap:18px;
+    padding:22px 0;border-bottom:1px solid var(--line);
+  }
+  .tiers li:last-child{border-bottom:0}
+  .num{
+    width:32px;height:32px;border-radius:50%;display:grid;place-items:center;
+    border:1px solid var(--line-strong);color:var(--ink-2);
+    font-size:13px;font-weight:600;background:var(--bg-card);
+  }
+  .tiers h3{margin:4px 0 6px}
+  .tiers p{margin:0;color:var(--muted);font-size:14.5px}
+
+  ol.steps{counter-reset:s;list-style:none;padding:0;margin:0;display:grid;gap:14px}
+  ol.steps li{counter-increment:s;display:grid;grid-template-columns:28px 1fr;gap:14px;align-items:start}
+  ol.steps li:before{
+    content:counter(s);width:26px;height:26px;border-radius:8px;
+    display:grid;place-items:center;font-size:12.5px;font-weight:600;
+    background:var(--accent-soft);color:var(--accent);margin-top:2px;
+  }
+  table{width:100%;border-collapse:collapse;font-size:14.5px;margin:18px 0 10px}
+  th,td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line)}
+  th{font-size:12.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:600}
+  td:first-child{white-space:nowrap}
+
+  ul.ticks{list-style:none;padding:0;margin:0;display:grid;gap:12px}
+  ul.ticks li{display:grid;grid-template-columns:20px 1fr;gap:10px;color:var(--ink-2);font-size:15px}
+  ul.ticks svg{width:16px;height:16px;color:#2bb673;margin-top:4px}
+
+  details{
+    border-bottom:1px solid var(--line);padding:16px 0;
+  }
+  details summary{
+    cursor:pointer;font-weight:600;font-size:15.5px;list-style:none;
+    display:flex;justify-content:space-between;gap:16px;align-items:center;
+  }
+  details summary::-webkit-details-marker{display:none}
+  details summary:after{content:"+";color:var(--muted);font-weight:400;font-size:20px;line-height:1}
+  details[open] summary:after{content:"−"}
+  details p{margin:12px 0 2px;color:var(--muted);font-size:14.8px}
+
+  .download-card{
+    display:grid;grid-template-columns:1fr auto;gap:28px;align-items:center;
+    border:1px solid var(--line);border-radius:20px;padding:34px;
+    background:var(--bg-card);box-shadow:var(--shadow);
+  }
+  .download-card h2{margin-bottom:10px}
+  code{
+    background:var(--code-bg);border:1px solid var(--line);border-radius:6px;
+    padding:1px 6px;font:13.5px/1.5 ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
+  }
+  footer{padding:44px 0 60px;border-top:1px solid var(--line);color:var(--muted);font-size:13.5px}
+  .foot-in{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;align-items:center}
+  .foot-links{display:flex;gap:18px;flex-wrap:wrap}
+  .foot-links a{color:var(--muted)}
+  .foot-links a:hover{color:var(--ink)}
+  .slogan{font-weight:600;color:var(--ink-2)}
+
+  @media (max-width:900px){
+    .g3,.g2{grid-template-columns:1fr}
+    .download-card{grid-template-columns:1fr}
+    .nav-links{display:none}
+  }
+  @media (max-width:620px){
+    .hero{padding-top:56px}
+    section{padding:56px 0}
+    .frame{margin-top:36px}
+    .tiers li{grid-template-columns:32px 1fr;gap:12px}
+  }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="nav-in">
+    <a class="brand" href="./">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M3 12a9 9 0 1 0 3.4-7"/><path d="M3 4v5h5"/>
+      </svg>
+      Codex-RetryPilot
+    </a>
+    <nav class="nav-links">
+      <a href="#features" data-en="Features">功能</a>
+      <a href="#how" data-en="How it clicks">点击方式</a>
+      <a href="#install" data-en="Install">安装</a>
+      <a href="#privacy" data-en="Privacy">隐私</a>
+      <a href="#faq" data-en="FAQ">常见问题</a>
+    </nav>
+    <div class="lang" role="group" aria-label="Language">
+      <button type="button" data-setlang="zh" aria-pressed="true">中文</button>
+      <button type="button" data-setlang="en" aria-pressed="false">EN</button>
+    </div>
+    <a class="btn btn-ghost btn-sm" href="https://github.com/yuxi1989/Codex-RetryPilot" target="_blank" rel="noopener">GitHub</a>
+  </div>
+</header>
+
+<main>
+  <div class="hero wrap">
+    <span class="eyebrow"><span class="dot"></span><span data-en="v1.0.1 · Notarized · MIT License">v1.0.1 · 已公证 · MIT 协议</span></span>
+    <h1 data-en="Codex stuck?<br><em>Let it hit Retry itself.</em>">Codex 卡住了？<br><em>让它自己点「重试」。</em></h1>
+    <p class="lede" data-en="When Codex answers <code>Selected model is at capacity</code>, RetryPilot finds the Retry button and presses it for you — cursor unmoved, focus untouched, task keeps running in the background.">Codex 弹出 <code>Selected model is at capacity</code> 时，RetryPilot 会找到「重试」按钮替你按下——光标不动、不抢焦点，任务在后台继续。</p>
+    <ul class="chips">
+      <li data-en="Auto Retry">自动重试</li>
+      <li data-en="Silent Background">后台静默</li>
+      <li data-en="Unattended">无人值守</li>
+      <li data-en="Fully Offline">完全离线</li>
+      <li data-en="Open Source">开源</li>
+    </ul>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/yuxi1989/Codex-RetryPilot/releases/latest" data-en="Download for macOS">下载 macOS 版</a>
+      <a class="btn btn-ghost" href="https://github.com/yuxi1989/Codex-RetryPilot" target="_blank" rel="noopener" data-en="View source">查看源码</a>
+    </div>
+    <div class="meta">
+      <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg><span data-en="macOS 13+">macOS 13 及以上</span></span>
+      <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7l8-4z"/></svg><span data-en="Universal · Apple Silicon &amp; Intel">Universal · Apple Silicon 与 Intel</span></span>
+      <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg><span data-en="Apple notarized">Apple 公证</span></span>
+    </div>
+
+    <figure class="frame" style="margin-bottom:0">
+      <div class="frame-bar"><i></i><i></i><i></i><span>Codex-RetryPilot · demo</span></div>
+      <img src="demo.gif" alt="Codex 显示 at capacity 错误，RetryPilot 自动点击重试" loading="lazy" width="900" height="533">
+    </figure>
+    <p class="caption" data-en="Real recording, not a mockup: Codex throws the capacity error on the left, Retry gets clicked on the right.">真实录屏，不是模拟：左侧 Codex 弹出容量错误，右侧自动完成点击。</p>
+  </div>
+
+  <section id="pain">
+    <div class="wrap narrow center">
+      <p class="kicker" data-en="The problem">问题</p>
+      <h2 data-en="You create. It retries.">你负责创造，它负责重试。</h2>
+      <p class="dim" data-en="You hand Codex a long task, go get coffee, and come back to find it stopped here:">给 Codex 安排一个长任务，转头去喝咖啡，回来发现它早就停在这一行：</p>
+      <blockquote class="err">Selected model is at capacity. <b>Please try a different model.</b></blockquote>
+      <p class="dim" data-en="Worse: it stalls at 3 a.m. and you only find out the next morning. This error does not kill your task — it waits for a single click. And that click is the whole problem.">更糟的是半夜卡住，第二天才发现几个小时白等。这个错误不会让任务失败，它只需要一次点击——而这一次点击，就是全部问题。</p>
+    </div>
+  </section>
+
+  <section id="features" class="soft">
+    <div class="wrap">
+      <p class="kicker" data-en="What it does">功能</p>
+      <h2 data-en="One small tool. One annoying problem solved.">一个小工具，解决一个烦人的问题。</h2>
+      <div class="grid g3" style="margin-top:32px">
+        <div class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12a9 9 0 1 0 3.4-7"/><path d="M3 4v5h5"/></svg></div>
+          <h3 data-en="Auto Retry">自动重试</h3>
+          <p data-en="Polls the Codex window, finds the capacity error, presses Retry, then checks the button state to avoid false positives.">轮询 Codex 窗口，发现容量错误就点击「重试」，点完检查按钮状态，减少误判与无效操作。</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4l7 8-7 8"/><path d="M13 4l7 8-7 8"/></svg></div>
+          <h3 data-en="Silent Background">静默后台</h3>
+          <p data-en="Prefers accessibility presses and native background clicks. No cursor movement, no app switching — you can keep typing elsewhere.">优先使用辅助功能按压与原生后台点击。不改光标位置、不切换前台应用，你在别的窗口打字不受影响。</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h10M4 18h7"/></svg></div>
+          <h3 data-en="Command Queue">指令接力</h3>
+          <p data-en="Optionally sends the next queued instruction once Codex has been idle for the configured time — useful for multi-step prompt chains.">Codex 空闲达到设定时长后，自动发送指令队列里的下一条。跑多步 prompt 链时不用守着屏幕。</p>
+        </div>
+      </div>
+      <div class="grid g2" style="margin-top:16px">
+        <div class="card">
+          <h3 data-en="Unattended operation">无人值守</h3>
+          <p data-en="Set the check interval and run duration; the app keeps waiting while Codex recovers, and stops itself when the timer ends.">自定义检测间隔与运行时长，让长任务持续等待恢复；到时自动停止，不用挂心。</p>
+        </div>
+        <div class="card">
+          <h3 data-en="Control and visibility">可控与可见</h3>
+          <p data-en="Condensed run log, idle auto-stop, optional sound notification, and JSON config import/export.">精简运行日志、空闲自动停止、可选提示音，配置支持 JSON 导入导出。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="how">
+    <div class="wrap">
+      <p class="kicker" data-en="Click strategy">点击方式</p>
+      <h2 data-en="Three tiers. It stops at the first one that works.">三层点击，前一层成功就不往后走。</h2>
+      <p class="dim narrow" data-en="The fallback chain is essentially a list of everything that failed first: buttons that reject synthetic presses, windows hidden behind other windows, Electron trees that go stale after a repaint.">兜底链其实是一份「失败清单」：拒绝合成按压的按钮、被其他窗口遮住的界面、重绘后失效的 Electron 无障碍树。</p>
+      <ol class="tiers">
+        <li>
+          <div class="num">1</div>
+          <div>
+            <h3 data-en="Accessibility press">辅助功能按压</h3>
+            <p data-en="Walks the Codex window tree, finds the button titled Retry / 重试 / 重試, and performs AXPress directly. Nothing moves on screen.">遍历 Codex 窗口结构，找到标题匹配「重试 / Retry / 重試」的按钮，直接 AXPress。屏幕上什么都不会动。</p>
+          </div>
+        </li>
+        <li>
+          <div class="num">2</div>
+          <div>
+            <h3 data-en="Background click to the process">原生后台点击</h3>
+            <p data-en="If the press does nothing, a click event is posted straight to Codex's process ID. Still no cursor movement, still works when the window is behind others.">按压无效时，把点击事件直接投递给 Codex 的进程 ID。依然不移动光标，窗口被遮挡也能点。</p>
+          </div>
+        </li>
+        <li>
+          <div class="num">3</div>
+          <div>
+            <h3 data-en="Coordinate click (compatible mode only)">坐标点击兜底（仅兼容模式）</h3>
+            <p data-en="A last resort: take a screenshot, confirm the Retry button is really on screen, click its center, then hand focus back to your previous app.">最后手段：先截图确认「重试」按钮真的在屏幕上，再点它的中心，点完把焦点还给你原来的窗口。</p>
+          </div>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="install" class="soft">
+    <div class="wrap">
+      <div class="download-card">
+        <div>
+          <p class="kicker" data-en="Download">下载</p>
+          <h2 data-en="No build step. Just download and drag.">不用编译，下载、拖进「应用程序」即可。</h2>
+          <p class="dim" data-en="Universal binary, notarized by Apple with the ticket stapled — double-click to open, no right-click or xattr workaround.">通用二进制，已通过 Apple 公证并装订票据——双击即可打开，不需要右键或 <code>xattr</code> 处理。</p>
+          <p class="dim" data-en="Verify with: <code>shasum -a 256 -c SHA256SUMS.txt</code>">校验：<code>shasum -a 256 -c SHA256SUMS.txt</code></p>
+        </div>
+        <a class="btn btn-primary" href="https://github.com/yuxi1989/Codex-RetryPilot/releases/latest" data-en="Go to Releases">前往 Releases</a>
+      </div>
+
+      <div class="grid g2" style="margin-top:40px;gap:40px">
+        <div>
+          <h3 style="margin-bottom:16px" data-en="Five steps">五步装好</h3>
+          <ol class="steps">
+            <li><span data-en="Download the <code>.dmg</code> (or <code>.zip</code>) from Releases.">从 Releases 下载 <code>.dmg</code>（或 <code>.zip</code>）。</span></li>
+            <li><span data-en="Drag the app into your Applications folder.">把应用拖进「应用程序」文件夹。</span></li>
+            <li><span data-en="Launch it and grant the permissions macOS asks for.">首次启动，按提示完成授权。</span></li>
+            <li><span data-en="Open the Codex desktop client.">打开 Codex 桌面客户端。</span></li>
+            <li><span data-en="Set the interval and duration, then hit Start.">设置检测间隔与运行时长，点开始运行。</span></li>
+          </ol>
+        </div>
+        <div>
+          <h3 style="margin-bottom:6px" data-en="Permissions, and why">需要的权限，以及用途</h3>
+          <table>
+            <thead><tr><th data-en="Permission">权限</th><th data-en="Used for">用途</th></tr></thead>
+            <tbody>
+              <tr><td data-en="Accessibility (required)">辅助功能（必需）</td><td data-en="Find the Retry button and press it">识别并点击 Codex 的重试按钮</td></tr>
+              <tr><td data-en="Screen Recording (required)">屏幕录制（必需）</td><td data-en="Confirm the button exists before a coordinate click">坐标点击前确认按钮真的在屏幕上</td></tr>
+              <tr><td data-en="Automation (optional)">自动化（可选）</td><td data-en="Hand focus back to your previous app">兼容模式下归还焦点</td></tr>
+            </tbody>
+          </table>
+          <p class="dim" style="font-size:13.5px" data-en="No permission is used to read your conversations, and nothing leaves the machine.">没有任何一项权限用于读取你的对话内容，数据也不离开本机。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="privacy">
+    <div class="wrap">
+      <p class="kicker" data-en="Privacy">隐私</p>
+      <h2 data-en="No network. No account. No data collection.">不联网，不注册，不上传数据。</h2>
+      <div class="grid g2" style="margin-top:26px">
+        <ul class="ticks">
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg><span data-en="No network code is linked at all — verify it yourself with <code>otool -L</code>">完全没有链接网络库，你可以用 <code>otool -L</code> 自行验证</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg><span data-en="No telemetry, no automatic update checks">无遥测统计，无自动更新检查</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg><span data-en="No accounts, no API keys">无账号，无需 API Key</span></li>
+        </ul>
+        <ul class="ticks">
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg><span data-en="Conversations, screenshots and logs never leave your Mac">Codex 会话、截图与日志都不会离开你的 Mac</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg><span data-en="Config is a local JSON file in <code>~/Library/Application Support/CodexRetry</code>">配置就是本地一个 JSON 文件，位于 <code>~/Library/Application Support/CodexRetry</code></span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg><span data-en="Native Swift, single file, zero third-party dependencies">Swift 原生实现，单个文件，零第三方依赖</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="faq" class="soft">
+    <div class="wrap narrow">
+      <p class="kicker" data-en="FAQ">常见问题</p>
+      <h2 data-en="The things people ask first">先回答最常被问的几件事</h2>
+      <div style="margin-top:22px">
+        <details>
+          <summary data-en="Does this bypass Codex capacity limits?">这算不算绕过 Codex 的容量限制？</summary>
+          <p data-en="No. It only clicks a button in your own client — no API key, no proxy, no request rewriting. If the service is genuinely full, the app keeps retrying and your task resumes when capacity frees up. It can't make capacity appear.">不。它只在你自己的客户端里点一个按钮——没有 API key、没有代理、不改请求。服务真忙的时候它只能继续重试，等容量空出来任务才恢复。它变不出容量。</p>
+        </details>
+        <details>
+          <summary data-en="Why does it need Screen Recording?">为什么需要「屏幕录制」权限？</summary>
+          <p data-en="Only one use: in compatible mode, take a screenshot to confirm the Retry button really is on screen before clicking its coordinates. The default silent path never takes a screenshot.">只有一个用途：兼容模式下坐标点击之前，用截图确认「重试」按钮确实在屏幕上，避免盲点。默认的静默模式全程不截图。</p>
+        </details>
+        <details>
+          <summary data-en="Can it click the wrong thing?">会不会点到别的地方？</summary>
+          <p data-en="Every tier requires a button whose title matches Retry / 重试 / 重試 to exist in the accessibility tree first. Coordinate clicks add a screenshot check on top. If no such button is found, nothing is clicked — coordinate clicking is disabled, not guessed.">三层都要求先在无障碍树里找到标题匹配「重试 / Retry / 重試」的按钮；坐标点击还要额外通过截图确认。找不到就不点——宁可不动，也不盲点。</p>
+        </details>
+        <details>
+          <summary data-en="Will it interrupt my typing?">会影响我正常用电脑吗？</summary>
+          <p data-en="By default no: the cursor doesn't move and focus isn't stolen. Compatible mode may briefly move the cursor for a coordinate click, then restores focus to your previous app.">默认不会：光标不动、不抢焦点。只有兼容模式的坐标点击会短暂移动光标，点完立刻把焦点还给你原来的窗口。</p>
+        </details>
+        <details>
+          <summary data-en="Does the command queue ever send a line twice?">指令队列会不会重复发送？</summary>
+          <p data-en="Rarely, but it can't be ruled out: text input can't be confirmed with 100% certainty through the accessibility API, so write queued instructions to be idempotent — re-sending one shouldn't break anything.">理论上可能，无法完全排除：通过无障碍接口无法 100% 确认输入框已清空，所以队列里的指令最好写成幂等的——重复发一条也不会把事情弄坏。</p>
+        </details>
+        <details>
+          <summary data-en="Windows or Linux?">有 Windows 或 Linux 版吗？</summary>
+          <p data-en="No. The whole approach is built on the macOS accessibility API; a port would be a rewrite, and I don't have that need right now.">没有。整套方案建立在 macOS 辅助功能接口上，移植等于重写，我目前也没有这个需求。</p>
+        </details>
+        <details>
+          <summary data-en="Why build this at all?">为什么要做这个？</summary>
+          <p data-en="Because Codex is capable but occasionally stalls. A temporary capacity message shouldn't park hours of work waiting for a human. It isn't complicated software — it just does one repetitive, annoying thing: when Codex gets stuck, it tries again. Built entirely with WorkBuddy, without hand-writing a line of code.">因为 Codex 很能干，但偶尔也会罢工。一条临时的容量提示，不该让几个小时的任务停在那里等人。它不是什么复杂的软件，只是替你做一件重复又烦人的事：当 Codex 卡住时，帮你再试一次。整个项目由 WorkBuddy 辅助开发，没有手写过一行代码。</p>
+        </details>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap foot-in">
+    <div>
+      <span class="slogan" data-en="From useless to useful — just a little every day.">无用到有用，只差每天一点。</span><br>
+      <span data-en="MIT License · © 2026 朱晓宇 yuxi1989">MIT 协议 · © 2026 朱晓宇 yuxi1989</span>
+    </div>
+    <div class="foot-links">
+      <a href="https://github.com/yuxi1989/Codex-RetryPilot" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/yuxi1989/Codex-RetryPilot/releases/latest" data-en="Releases">下载</a>
+      <a href="https://github.com/yuxi1989/Codex-RetryPilot/issues" data-en="Issues">反馈</a>
+      <a href="https://github.com/yuxi1989/Codex-RetryPilot/blob/main/LICENSE" data-en="License">协议</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var KEY = 'crp-lang';
+  var prefers = (navigator.language || 'zh').toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en';
+  var lang = localStorage.getItem(KEY) || prefers;
+
+  var nodes = document.querySelectorAll('[data-en]');
+  nodes.forEach(function (el) {
+    if (el.dataset.zh === undefined) el.dataset.zh = el.innerHTML;
+  });
+
+  function apply(l) {
+    nodes.forEach(function (el) {
+      el.innerHTML = (l === 'en') ? el.dataset.en : el.dataset.zh;
+    });
+    document.documentElement.lang = (l === 'en') ? 'en' : 'zh-CN';
+    document.querySelectorAll('[data-setlang]').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.dataset.setlang === l));
+    });
+    document.title = (l === 'en')
+      ? 'Codex-RetryPilot — clicks Retry when Codex gets stuck'
+      : 'Codex-RetryPilot — Codex 卡住时，替你点「重试」';
+  }
+
+  document.querySelectorAll('[data-setlang]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      lang = b.dataset.setlang;
+      localStorage.setItem(KEY, lang);
+      apply(lang);
+    });
+  });
+
+  apply(lang);
+})();
+</script>
+</body>
+</html>
