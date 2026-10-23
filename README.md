@@ -59,7 +59,7 @@
 | 屏幕录制（必需） | 截图并识别目标界面 |
 | 自动化（可选） | 兼容模式下恢复原应用焦点 |
 
-如果首次打开提示「无法验证开发者」：在应用上右键 → 打开，或执行 `xattr -cr /Applications/Codex-RetryPilot.app`。不建议为了安装而全局关闭 Gatekeeper。
+应用已通过 Apple 公证（Notarized Developer ID），下载后双击即可打开，无需右键或 `xattr` 处理。
 
 ### 安静工作，不打扰你
 
@@ -165,7 +165,7 @@ Codex-RetryPilot detects this error, finds the Retry button, and automatically a
 4. Open the Codex desktop client.
 5. Configure RetryPilot and start monitoring.
 
-Required permissions: Accessibility and Screen Recording. Automation is optional. If macOS blocks the first launch, right-click the app → Open, or run `xattr -cr /Applications/Codex-RetryPilot.app`. Please don't disable Gatekeeper globally just to install.
+Required permissions: Accessibility and Screen Recording. Automation is optional. The app is notarized by Apple (Notarized Developer ID) — double-click to open, no right-click or `xattr` workaround needed.
 
 ### Two retry modes
 
