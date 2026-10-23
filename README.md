@@ -1,14 +1,19 @@
+<div align="center">
+
 # Codex-RetryPilot
 
 > **无用到有用，只差每天一点。**
 
-**Codex 卡住了？让 RetryPilot 替你点「重试」。**
+### Codex 卡住了？让 RetryPilot 替你点「重试」。
 
-让 Codex 自动应对模型繁忙，告别反复手动重试。任务继续跑，你该干什么就干什么。
+让 Codex 自动应对模型繁忙，告别反复手动重试。  
+**任务继续跑，你该干什么就干什么。**
 
 **自动重试 · 后台静默 · 无人值守 · 完全开源**
 
-[中文](#中文) | [English](#english) | [下载安装](https://github.com/yuxi1989/Codex-RetryPilot/releases) | [MIT License](LICENSE)
+[中文介绍](#中文) · [English](#english) · [下载最新版本](https://github.com/yuxi1989/Codex-RetryPilot/releases) · [MIT License](LICENSE)
+
+</div>
 
 ---
 
@@ -20,7 +25,7 @@
 
 给 Codex 安排了一个长任务，转头去喝杯咖啡，回来却发现它早就停在了：
 
-**Selected model is at capacity. Please try a different model.**
+> `Selected model is at capacity. Please try a different model.`
 
 ![Codex 反复弹出 at capacity 错误](docs/codex-at-capacity.png)
 
@@ -41,9 +46,9 @@
 
 ### 下载与安装
 
-**无需自己编译，下载 Release 安装包即可使用。**
+**无需自行编译，直接下载已发布的安装包。**
 
-[前往 GitHub Releases 下载最新版本](https://github.com/yuxi1989/Codex-RetryPilot/releases)
+**[下载最新版本 → GitHub Releases](https://github.com/yuxi1989/Codex-RetryPilot/releases)**
 
 1. 打开 Releases 页面，下载适用于 macOS 的 `.dmg` 或 `.zip` 安装包。
 2. `.dmg` 直接打开后把应用拖进「应用程序」；`.zip` 解压后把 `.app` 拖进「应用程序」。
@@ -59,7 +64,7 @@
 | 屏幕录制（必需） | 截图并识别目标界面 |
 | 自动化（可选） | 兼容模式下恢复原应用焦点 |
 
-应用已通过 Apple 公证（Notarized Developer ID），下载后双击即可打开，无需右键或 `xattr` 处理。
+> **应用签名与公证：** 发布版本已通过 Apple 公证（Notarized Developer ID）并装订票据，下载后双击即可打开，无需右键或 `xattr` 处理。
 
 ### 安静工作，不打扰你
 
@@ -95,7 +100,7 @@ RetryPilot 提供两种重试模式。
 项目核心代码为单个 `main.swift`，无需第三方依赖。需要安装 Xcode Command Line Tools。
 
 ```bash
-cd <项目目录>
+cd /path/to/Codex-RetryPilot
 export SDKROOT=$(xcrun --show-sdk-path)
 xcrun swiftc -O main.swift -o CodexRetry
 ```
@@ -114,11 +119,11 @@ xcrun swiftc -O main.swift -o CodexRetry
 
 ### 开源协议
 
-本项目采用 **MIT License** 开源。
+本项目采用 **[MIT License](LICENSE)** 开源。
 
 欢迎自由使用、修改和分发，也欢迎提交 Issue 和 Pull Request。
 
-GitHub：[yuxi1989/Codex-RetryPilot](https://github.com/yuxi1989/Codex-RetryPilot)
+**项目仓库：** [yuxi1989/Codex-RetryPilot](https://github.com/yuxi1989/Codex-RetryPilot)
 
 ---
 
@@ -138,7 +143,7 @@ Stop babysitting Codex when models are at capacity. Let your tasks keep moving w
 
 You start a long-running Codex task, grab a coffee, and return to find:
 
-**Selected model is at capacity. Please try a different model.**
+> `Selected model is at capacity. Please try a different model.`
 
 ![Codex hitting the at capacity error repeatedly](docs/codex-at-capacity.png)
 
@@ -165,7 +170,7 @@ Codex-RetryPilot detects this error, finds the Retry button, and automatically a
 4. Open the Codex desktop client.
 5. Configure RetryPilot and start monitoring.
 
-Required permissions: Accessibility and Screen Recording. Automation is optional. The app is notarized by Apple (Notarized Developer ID) — double-click to open, no right-click or `xattr` workaround needed.
+Required permissions: Accessibility and Screen Recording. Automation is optional. Release builds are notarized by Apple (Notarized Developer ID) with the ticket stapled — double-click to open, no right-click or `xattr` workaround needed.
 
 ### Two retry modes
 
@@ -195,7 +200,7 @@ macOS 13 Ventura or later (14 Sonoma+ recommended), universal binary for Apple S
 Install Xcode Command Line Tools, then run:
 
 ```bash
-cd <project-dir>
+cd /path/to/Codex-RetryPilot
 export SDKROOT=$(xcrun --show-sdk-path)
 xcrun swiftc -O main.swift -o CodexRetry
 ```
@@ -214,6 +219,6 @@ Built entirely with WorkBuddy, without manually writing a single line of code.
 
 ### License
 
-Released under the **MIT License** — free to use, modify, and distribute under its terms.
+Released under the **[MIT License](LICENSE)** — free to use, modify, and distribute under its terms.
 
 [GitHub Repository](https://github.com/yuxi1989/Codex-RetryPilot)
