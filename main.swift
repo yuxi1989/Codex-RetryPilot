@@ -19,6 +19,12 @@ func nowTick() -> Double { ProcessInfo.processInfo.systemUptime }
 
 // MARK: - 状态胶囊（圆角浅色底 + 彩色圆点，现代 macOS 风格）
 
+/// 四元填充色：.quaternarySystemFill 是 macOS 14 才有的，13 上用等效半透明灰
+func quaternaryFill() -> NSColor {
+    if #available(macOS 14.0, *) { return .quaternarySystemFill }
+    return NSColor.secondaryLabelColor.withAlphaComponent(0.08)
+}
+
 /// 圆角胶囊视图：彩色圆点 + 文字，底色随状态着色（辅助功能/屏幕录制/自动化/运行状态共用）
 final class ChipView: NSView {
     let label = NSTextField(labelWithString: "")
@@ -54,7 +60,7 @@ final class ChipView: NSView {
             .font: label.font!,
             .foregroundColor: color == .systemGray ? NSColor.secondaryLabelColor : color,
         ])
-        layer?.backgroundColor = (color == .systemGray ? NSColor.quaternarySystemFill : color.withAlphaComponent(0.12)).cgColor
+        layer?.backgroundColor = (color == .systemGray ? quaternaryFill() : color.withAlphaComponent(0.12)).cgColor
     }
 }
 
@@ -1102,7 +1108,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
 
         let box = NSBox()
         box.boxType = .custom
-        box.fillColor = .quaternarySystemFill
+        box.fillColor = quaternaryFill()
         box.borderColor = .clear
         box.cornerRadius = 10
         box.titlePosition = .noTitle
