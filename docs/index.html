@@ -120,6 +120,26 @@
     border:1px solid var(--line);border-radius:999px;padding:5px 12px;
   }
   .cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+  .brew{margin:18px auto 0;display:flex;flex-direction:column;align-items:center;gap:8px}
+  .brew-label{font-size:13px;color:var(--muted)}
+  .brew-cmd{
+    display:inline-flex;align-items:center;gap:10px;max-width:100%;
+    background:var(--code-bg);border:1px solid var(--line);border-radius:10px;
+    padding:7px 7px 7px 14px;
+  }
+  .brew-cmd code{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--ink);white-space:nowrap}
+  .brew-copy{
+    font:inherit;font-size:12px;line-height:1.6;color:var(--ink-2);background:var(--bg-card);
+    border:1px solid var(--line-strong);border-radius:7px;padding:2px 10px;cursor:pointer;
+    transition:color .15s,border-color .15s;
+  }
+  .brew-copy:hover{color:var(--ink);border-color:var(--accent)}
+  .brew-copy:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .brew-copy.is-done{color:var(--ok);border-color:var(--ok)}
+  @media(max-width:640px){
+    .brew-cmd{display:flex;width:100%;padding:8px 10px}
+    .brew-cmd code{font-size:11.5px;white-space:normal;word-break:break-all;text-align:left}
+  }
   .meta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;color:var(--muted);font-size:13px;margin-top:20px}
   .meta span{display:inline-flex;align-items:center;gap:6px}
   .meta svg{width:14px;height:14px;opacity:.75}
@@ -286,6 +306,13 @@
       <a class="btn btn-primary" href="https://github.com/yuxi1989/Codex-RetryPilot/releases/latest" data-en="Download for macOS">下载 macOS 版</a>
       <a class="btn btn-ghost" href="https://github.com/yuxi1989/Codex-RetryPilot" target="_blank" rel="noopener" data-en="View source">查看源码</a>
     </div>
+    <div class="brew">
+      <span class="brew-label" data-en="Or install with Homebrew — recommended, easy upgrades">或用 Homebrew 安装——推荐，升级方便</span>
+      <span class="brew-cmd">
+        <code id="brew-cmd">brew install --cask yuxi1989/tap/codex-retrypilot</code>
+        <button type="button" class="brew-copy" id="brew-copy" aria-label="复制 Homebrew 安装命令" data-en="Copy">复制</button>
+      </span>
+    </div>
     <div class="meta">
       <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg><span data-en="macOS 13+">macOS 13 及以上</span></span>
       <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7l8-4z"/></svg><span data-en="Universal · Apple Silicon &amp; Intel">Universal · Apple Silicon 与 Intel</span></span>
@@ -381,7 +408,7 @@
           <p class="kicker" data-en="Download">下载</p>
           <h2 data-en="No build step. Just download and drag.">不用编译，下载、拖进「应用程序」即可。</h2>
           <p class="dim" data-en="Universal binary, notarized by Apple with the ticket stapled — double-click to open, no right-click or xattr workaround.">通用二进制，已通过 Apple 公证并装订票据——双击即可打开，不需要右键或 <code>xattr</code> 处理。</p>
-          <p class="dim" data-en="Or with Homebrew: <code>brew install --cask yuxi1989/tap/codex-retrypilot</code>">也可以用 Homebrew：<code>brew install --cask yuxi1989/tap/codex-retrypilot</code></p>
+          <p class="dim" data-en="Prefer Homebrew? The one-line command is at the top of this page.">更喜欢 Homebrew？一行命令在页面顶部。</p>
           <p class="dim" data-en="Verify downloads with: <code>shasum -a 256 -c SHA256SUMS.txt</code>">校验：<code>shasum -a 256 -c SHA256SUMS.txt</code></p>
         </div>
         <a class="btn btn-primary" href="https://github.com/yuxi1989/Codex-RetryPilot/releases/latest" data-en="Go to Releases">前往 Releases</a>
@@ -519,6 +546,42 @@
   });
 
   apply(lang);
+})();
+
+(function () {
+  var btn = document.getElementById('brew-copy');
+  var cmd = document.getElementById('brew-cmd');
+  if (!btn || !cmd) return;
+
+  function fallback(text, done) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.top = '-1000px';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); done(); } catch (e) {}
+    document.body.removeChild(ta);
+  }
+
+  btn.addEventListener('click', function () {
+    var text = cmd.textContent.trim();
+    function done() {
+      var en = document.documentElement.lang === 'en';
+      btn.textContent = en ? 'Copied' : '已复制';
+      btn.classList.add('is-done');
+      setTimeout(function () {
+        btn.innerHTML = en ? btn.dataset.en : btn.dataset.zh;
+        btn.classList.remove('is-done');
+      }, 1600);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, function () { fallback(text, done); });
+    } else {
+      fallback(text, done);
+    }
+  });
 })();
 </script>
 </body>

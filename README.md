@@ -13,6 +13,14 @@
 
 [官网](https://yuxi1989.github.io/Codex-RetryPilot/) · [中文介绍](#中文) · [English](#english) · [下载最新版本](https://github.com/yuxi1989/Codex-RetryPilot/releases) · [MIT License](LICENSE)
 
+**Homebrew 安装（推荐）**
+
+```bash
+brew install --cask yuxi1989/tap/codex-retrypilot
+```
+
+升级：`brew upgrade --cask codex-retrypilot`　·　不用 Homebrew？[直接下载 `.dmg` / `.zip`](https://github.com/yuxi1989/Codex-RetryPilot/releases)
+
 ![Codex-RetryPilot 自动重试演示](docs/demo.gif)
 
 *真实录屏：左侧 Codex 弹出 at capacity，右侧自动点击「重试」，错误被清除。*  
@@ -51,17 +59,7 @@
 
 ### 下载与安装
 
-**无需自行编译，两种方式任选。**
-
-**方式一：Homebrew（推荐，便于升级）**
-
-```bash
-brew install --cask yuxi1989/tap/codex-retrypilot
-```
-
-升级：`brew upgrade --cask codex-retrypilot`
-
-**方式二：手动下载**
+**Homebrew 安装命令见页面顶部。** 不想装 Homebrew，就手动下载：
 
 **[下载最新版本 → GitHub Releases](https://github.com/yuxi1989/Codex-RetryPilot/releases)**
 
@@ -177,13 +175,7 @@ Codex-RetryPilot detects this error, finds the Retry button, and automatically a
 
 ### Download & Install
 
-**Option 1 — Homebrew (recommended, easy upgrades):**
-
-```bash
-brew install --cask yuxi1989/tap/codex-retrypilot
-```
-
-**Option 2 — Manual download:** [GitHub Releases](https://github.com/yuxi1989/Codex-RetryPilot/releases)
+**Homebrew command is at the top of this page.** Prefer a manual install: [GitHub Releases](https://github.com/yuxi1989/Codex-RetryPilot/releases)
 
 1. Download the macOS `.dmg` or `.zip` release asset.
 2. Drag the app into your Applications folder.
