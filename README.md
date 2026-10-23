@@ -11,7 +11,7 @@
 
 **自动重试 · 后台静默 · 无人值守 · 完全开源**
 
-[中文介绍](#中文) · [English](#english) · [下载最新版本](https://github.com/yuxi1989/Codex-RetryPilot/releases) · [MIT License](LICENSE)
+[官网](https://yuxi1989.github.io/Codex-RetryPilot/) · [中文介绍](#中文) · [English](#english) · [下载最新版本](https://github.com/yuxi1989/Codex-RetryPilot/releases) · [MIT License](LICENSE)
 
 ![Codex-RetryPilot 自动重试演示](docs/demo.gif)
 
