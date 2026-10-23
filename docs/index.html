@@ -21,9 +21,11 @@
     --muted:#5f6b7c;
     --line:#e5e8ef;
     --line-strong:#d3d8e3;
-    --accent:#2f6bff;
+    --accent:#2258e6;
     --accent-soft:#eaf0ff;
     --code-bg:#f3f4f8;
+    --ok:#1fa15e;
+    --err:#b83838;
     --shadow:0 24px 60px -24px rgba(16,24,40,.30);
     --radius:16px;
     --max:1040px;
@@ -41,6 +43,8 @@
       --accent:#6c95ff;
       --accent-soft:#17233d;
       --code-bg:#161c27;
+      --ok:#2bb673;
+      --err:#e07070;
       --shadow:0 24px 60px -24px rgba(0,0,0,.7);
     }
   }
@@ -55,6 +59,10 @@
   }
   a{color:var(--accent);text-decoration:none}
   a:hover{text-decoration:underline}
+  :is(a,button,summary):focus-visible{
+    outline:2px solid var(--accent);outline-offset:2px;border-radius:8px;
+  }
+  .lang button:focus-visible,.btn:focus-visible{border-radius:999px}
   .wrap{max-width:var(--max);margin:0 auto;padding:0 24px}
   header.nav{
     position:sticky;top:0;z-index:20;
@@ -99,12 +107,12 @@
     border:1px solid var(--line);background:var(--bg-card);
     padding:5px 12px;border-radius:999px;margin-bottom:22px;
   }
-  .dot{width:6px;height:6px;border-radius:50%;background:#2bb673;box-shadow:0 0 0 3px rgba(43,182,115,.16)}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb, var(--ok) 16%, transparent)}
   h1{
     font-size:clamp(34px,5.4vw,58px);line-height:1.1;letter-spacing:-.03em;
     margin:0 0 18px;font-weight:700;
   }
-  h1 em{font-style:normal;background:linear-gradient(96deg,var(--accent),#9a6bff 80%);-webkit-background-clip:text;background-clip:text;color:transparent}
+  h1 em{font-style:normal;color:var(--accent)}
   .lede{font-size:clamp(16px,1.9vw,19px);color:var(--ink-2);max-width:660px;margin:0 auto 26px}
   .chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:0 0 30px;padding:0;list-style:none}
   .chips li{
@@ -146,7 +154,7 @@
     font:14.5px/1.5 ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
     color:var(--ink-2);overflow-x:auto;
   }
-  blockquote.err b{color:#d24a4a;font-weight:600}
+  blockquote.err b{color:var(--err);font-weight:600}
 
   .grid{display:grid;gap:16px}
   .g3{grid-template-columns:repeat(3,1fr)}
@@ -191,7 +199,7 @@
 
   ul.ticks{list-style:none;padding:0;margin:0;display:grid;gap:12px}
   ul.ticks li{display:grid;grid-template-columns:20px 1fr;gap:10px;color:var(--ink-2);font-size:15px}
-  ul.ticks svg{width:16px;height:16px;color:#2bb673;margin-top:4px}
+  ul.ticks svg{width:16px;height:16px;color:var(--ok);margin-top:4px}
 
   details{
     border-bottom:1px solid var(--line);padding:16px 0;
@@ -225,7 +233,9 @@
   @media (max-width:900px){
     .g3,.g2{grid-template-columns:1fr}
     .download-card{grid-template-columns:1fr}
-    .nav-links{display:none}
+    /* 移动端隐藏次要锚点，但保留「安装」「常见问题」两个高频入口 */
+    .nav-links a{display:none}
+    .nav-links a.keep{display:inline}
   }
   @media (max-width:620px){
     .hero{padding-top:56px}
@@ -248,9 +258,9 @@
     <nav class="nav-links">
       <a href="#features" data-en="Features">功能</a>
       <a href="#how" data-en="How it clicks">点击方式</a>
-      <a href="#install" data-en="Install">安装</a>
+      <a href="#install" class="keep" data-en="Install">安装</a>
       <a href="#privacy" data-en="Privacy">隐私</a>
-      <a href="#faq" data-en="FAQ">常见问题</a>
+      <a href="#faq" class="keep" data-en="FAQ">常见问题</a>
     </nav>
     <div class="lang" role="group" aria-label="Language">
       <button type="button" data-setlang="zh" aria-pressed="true">中文</button>
@@ -371,7 +381,8 @@
           <p class="kicker" data-en="Download">下载</p>
           <h2 data-en="No build step. Just download and drag.">不用编译，下载、拖进「应用程序」即可。</h2>
           <p class="dim" data-en="Universal binary, notarized by Apple with the ticket stapled — double-click to open, no right-click or xattr workaround.">通用二进制，已通过 Apple 公证并装订票据——双击即可打开，不需要右键或 <code>xattr</code> 处理。</p>
-          <p class="dim" data-en="Verify with: <code>shasum -a 256 -c SHA256SUMS.txt</code>">校验：<code>shasum -a 256 -c SHA256SUMS.txt</code></p>
+          <p class="dim" data-en="Or with Homebrew: <code>brew install --cask yuxi1989/tap/codex-retrypilot</code>">也可以用 Homebrew：<code>brew install --cask yuxi1989/tap/codex-retrypilot</code></p>
+          <p class="dim" data-en="Verify downloads with: <code>shasum -a 256 -c SHA256SUMS.txt</code>">校验：<code>shasum -a 256 -c SHA256SUMS.txt</code></p>
         </div>
         <a class="btn btn-primary" href="https://github.com/yuxi1989/Codex-RetryPilot/releases/latest" data-en="Go to Releases">前往 Releases</a>
       </div>

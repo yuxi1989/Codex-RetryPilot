@@ -51,7 +51,17 @@
 
 ### 下载与安装
 
-**无需自行编译，直接下载已发布的安装包。**
+**无需自行编译，两种方式任选。**
+
+**方式一：Homebrew（推荐，便于升级）**
+
+```bash
+brew install --cask yuxi1989/tap/codex-retrypilot
+```
+
+升级：`brew upgrade --cask codex-retrypilot`
+
+**方式二：手动下载**
 
 **[下载最新版本 → GitHub Releases](https://github.com/yuxi1989/Codex-RetryPilot/releases)**
 
@@ -167,7 +177,13 @@ Codex-RetryPilot detects this error, finds the Retry button, and automatically a
 
 ### Download & Install
 
-[Download from GitHub Releases](https://github.com/yuxi1989/Codex-RetryPilot/releases)
+**Option 1 — Homebrew (recommended, easy upgrades):**
+
+```bash
+brew install --cask yuxi1989/tap/codex-retrypilot
+```
+
+**Option 2 — Manual download:** [GitHub Releases](https://github.com/yuxi1989/Codex-RetryPilot/releases)
 
 1. Download the macOS `.dmg` or `.zip` release asset.
 2. Drag the app into your Applications folder.
