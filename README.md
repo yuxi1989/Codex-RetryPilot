@@ -87,7 +87,7 @@ RetryPilot 提供两种重试模式。
 ### 系统要求
 
 - macOS 13 Ventura 或更高版本（推荐 macOS 14 Sonoma 及以上）
-- Apple Silicon / Intel Mac
+- Universal 二进制，Apple Silicon 与 Intel Mac 均可
 - Codex 桌面客户端
 
 ### 从源码构建
@@ -188,7 +188,7 @@ Neither mode bypasses Codex model capacity limits. The app retries automatically
 
 ### Requirements
 
-macOS 13 Ventura or later (14 Sonoma+ recommended), Apple Silicon or Intel, and the Codex desktop client.
+macOS 13 Ventura or later (14 Sonoma+ recommended), universal binary for Apple Silicon and Intel Macs, and the Codex desktop client.
 
 ### Build from Source
 
