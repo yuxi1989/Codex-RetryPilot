@@ -923,7 +923,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         let soundRow = switchRow(soundCheck, L("Play sound on stop", "停止时播放提示音"))
         autoLearnCheck = NSSwitch()
         autoLearnCheck.state = .on
-        let autoLearnRow = switchRow(autoLearnCheck, L("Auto-learn new button styles", "自动学习新版按钮样式"),
+        let autoLearnRow = switchRow(autoLearnCheck, L("Auto-adapt if the Codex UI changes", "Codex 界面更新后自动适配按钮"),
                                      tip: L("When matching fails, capture the new button appearance as a template", "匹配失败时自动收录新按钮外观为模板"))
 
         let optCol1 = NSStackView(views: [noSleepRow, idleStopRow])
@@ -969,9 +969,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
                                                            "指令内容（每行一条，依次发送，空行跳过）："))
         scriptLabel.font = .systemFont(ofSize: 11)
         scriptLabel.textColor = .secondaryLabelColor
-        let scriptScroll = NSScrollView()
-        scriptScroll.hasVerticalScroller = true
-        scriptScroll.borderType = .bezelBorder
+        let scriptScroll = thinScroll()
         scriptScroll.translatesAutoresizingMaskIntoConstraints = false
         scriptView = NSTextView()
         scriptView.font = .systemFont(ofSize: 12)
@@ -994,6 +992,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         startBtn = symbolButton(L("Start", "开始监控"), symbol: "play.fill", action: #selector(startTapped), key: "\r")
         stopBtn = symbolButton(L("Stop", "停止"), symbol: "stop.fill", action: #selector(stopTapped))
         stopBtn.isEnabled = false
+        stopBtn.alphaValue = 0.45   // 系统禁用态与普通灰按钮区分弱，叠加降透明度让「不可用」一眼可辨
         calibBtn = symbolButton(L("Calibrate", "校准按钮"), symbol: "scope", action: #selector(calibrateTapped))
         calibBtn.toolTip = L("Teach the app what the \"Retry\" button looks like (only needed after Codex UI updates)", "教应用认识「重试」按钮的样子（Codex 界面更新后才需要）")
         permBtn = symbolButton(L("Permissions", "授权"), symbol: "checkmark.shield", action: #selector(openPermTapped))
@@ -1008,9 +1007,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         statusChip.label.font = .systemFont(ofSize: 12, weight: .medium)
 
         // ── 日志 ──
-        let scroll = NSScrollView()
-        scroll.hasVerticalScroller = true
-        scroll.borderType = .bezelBorder
+        let scroll = thinScroll()
         scroll.translatesAutoresizingMaskIntoConstraints = false
         logView = NSTextView()
         logView.isEditable = false
@@ -1059,6 +1056,21 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
     /// 权限状态胶囊（内容由 refreshPermLabel 填充）
     private func chipLabel(_ name: String) -> ChipView {
         ChipView(name, tip: L("\(name) permission status", "\(name)权限状态"))
+    }
+
+    /// 细边框滚动容器：系统 .bezelBorder 是 2px 内凹黑边，观感偏重；
+    /// 这里用 1px separator 描边 + 圆角，与卡片风格统一
+    private func thinScroll() -> NSScrollView {
+        let s = NSScrollView()
+        s.hasVerticalScroller = true
+        s.borderType = .noBorder
+        s.wantsLayer = true
+        if s.layer == nil { s.layer = CALayer() }
+        s.layer?.cornerRadius = 8
+        s.layer?.cornerCurve = .continuous
+        s.layer?.borderWidth = 1
+        s.layer?.borderColor = NSColor.separatorColor.cgColor
+        return s
     }
 
     /// 表单行左侧固定宽度标签
@@ -1146,16 +1158,20 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         let name_au = L("Automation", "自动化")
         permAxLabel.set(color: ax ? .systemGreen : .systemRed, dot: ax ? "✓" : "✗", text: name_ax)
         permScLabel.set(color: sc ? .systemGreen : .systemRed, dot: sc ? "✓" : "✗", text: name_sc)
-        // AEDeterminePermissionToAutomateTarget 返回值不可信，未明确 granted 时只标「待确认」，不当作缺失
-        permAutoLabel.set(color: auto == "granted" ? .systemGreen : .systemOrange,
-                          dot: auto == "granted" ? "✓" : "?",
-                          text: auto == "granted" ? name_au : "\(name_au) \(L("unconfirmed", "待确认"))")
+        // AEDeterminePermissionToAutomateTarget 返回值不可信，未明确 granted 时不当作缺失。
+        // 自动化本身是可选权限：静默模式下用中性灰标注「可选」，只有兼容模式（坐标点击归还焦点用到它）才升级为琥珀「建议授权」
+        let autoWarn = silentSeg.selectedSegment == 1
+        permAutoLabel.set(color: auto == "granted" ? .systemGreen : (autoWarn ? .systemOrange : .systemGray),
+                          dot: auto == "granted" ? "✓" : "○",
+                          text: auto == "granted" ? name_au
+                              : autoWarn ? "\(name_au) \(L("recommended", "建议授权"))"
+                                         : "\(name_au) \(L("optional", "可选"))")
         permAxLabel.toolTip = ax ? L("Accessibility permission granted", "辅助功能权限已授予")
                                  : L("Missing: cannot read Codex UI elements (required)", "缺失：无法读取 Codex 界面元素（必需）")
         permScLabel.toolTip = sc ? L("Screen Recording permission granted", "屏幕录制权限已授予")
                                  : L("Missing: cannot capture screenshots to detect the error line (required)", "缺失：无法截图识别错误行（必需）")
         permAutoLabel.toolTip = auto == "granted" ? L("Automation permission granted", "自动化权限已授予")
-                                                  : L("Needed only to return focus after the coordinate-click fallback. macOS reports this state unreliably, so it is checked on demand (click \"Grant\" to verify)", "仅在坐标点击兜底后归还焦点时用到。系统对该状态回报不可靠，改为按需检测（点「授权」按钮可手动确认）")
+                                                  : L("Optional. Only used to return focus after the coordinate-click fallback (compatible mode). macOS reports this state unreliably, so it is checked on demand (click \"Permissions\" to verify)", "可选权限。仅兼容模式的坐标点击兜底归还焦点时用到。系统对该状态回报不可靠，改为按需检测（点「授权」按钮可手动确认）")
     }
 
     /// 点击方式切换：更新下方说明并即时保存
@@ -1172,6 +1188,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
             : L("Coordinate click only — the cursor briefly moves. Use this if pressing has no effect on your machine.",
                 "仅用坐标点击——会短暂移动鼠标。按压在本机不起作用时选这个。")
         clickModeNote.textColor = silent ? .secondaryLabelColor : .systemOrange
+        refreshPermLabel()   // 兼容模式依赖自动化权限，切换时同步刷新头部胶囊语义
     }
 
     /// 空闲发送开关切换：关闭时下方「空闲分钟 + 指令内容」整体置灰禁用
@@ -1235,6 +1252,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         lastErrorAt = Date()
         startBtn.isEnabled = false
         stopBtn.isEnabled = true
+        stopBtn.alphaValue = 1.0
         durationPopup.isEnabled = false
         customField.isEnabled = false
         calibBtn.isEnabled = false
@@ -1268,6 +1286,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         DispatchQueue.main.async {
             self.startBtn.isEnabled = true
             self.stopBtn.isEnabled = false
+            self.stopBtn.alphaValue = 0.45
             self.durationPopup.isEnabled = true
             self.customField.isEnabled = self.durationPopup.indexOfSelectedItem == 4
             if self.durationPopup.indexOfSelectedItem == 4 {
@@ -1545,7 +1564,10 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
                     sleepSec(interval)
                     continue
                 }
-                appendLog(L("Button area mismatch (\(detail))", "按钮区域不匹配（\(detail)）"))
+                // UI 只显示可读观察文案；t/c/xor 等模板匹配参数只落日志文件，同签名由 appendLog 合并为 ×N
+                appendLog(L("Button appearance not recognized yet, watching… (auto-learns new styles if enabled)",
+                            "按钮外观暂未识别，继续观察…（已开启时自动学习新样式）"),
+                          fileDetail: L("Button area mismatch (\(detail))", "按钮区域不匹配（\(detail)）"))
                 if autoLearn, let g = grayPixels(cand, w: 160, h: 60) {
                     let (_, cCount) = inkMask(g, k: 0.8)
                     if cCount > 60, cCount < 2500 {
@@ -2007,19 +2029,41 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
 
     // MARK: 日志
 
-    func appendLog(_ text: String) {
+    /// 同签名去重状态（主线程专用）：与上一条相同的内容合并为「×N」，避免每 10 秒刷一条相同的观察日志
+    private var lastLogPlain: String?
+    private var lastLogRepeat = 0
+    private var lastLogRange = NSRange(location: NSNotFound, length: 0)
+
+    /// fileDetail 非空时：UI 只显示 text（可读文案），参数等细节只写进日志文件
+    func appendLog(_ text: String, fileDetail: String? = nil) {
         let f = DateFormatter()
         f.dateFormat = "HH:mm:ss"
-        let line = "[\(f.string(from: Date()))] \(text)\n"
-        writeLogFile(line)
+        let stamp = f.string(from: Date())
+        writeLogFile("[\(stamp)] \(fileDetail ?? text)\n")
         DispatchQueue.main.async { [weak self] in
             guard let self, let ts = self.logView.textStorage else { return }
-            ts.append(NSAttributedString(string: line, attributes: [
+            let attr: [NSAttributedString.Key: Any] = [
                 .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
                 .foregroundColor: NSColor.labelColor
-            ]))
+            ]
+            if text == self.lastLogPlain, self.lastLogRange.location != NSNotFound,
+               NSMaxRange(self.lastLogRange) <= ts.length {
+                // 与上一条相同：原位替换为「… ×N」
+                self.lastLogRepeat += 1
+                let line = "[\(stamp)] \(text) ×\(self.lastLogRepeat)\n"
+                ts.replaceCharacters(in: self.lastLogRange, with: NSAttributedString(string: line, attributes: attr))
+                self.lastLogRange = NSRange(location: self.lastLogRange.location, length: (line as NSString).length)
+            } else {
+                self.lastLogPlain = text
+                self.lastLogRepeat = 1
+                let line = "[\(stamp)] \(text)\n"
+                ts.append(NSAttributedString(string: line, attributes: attr))
+                self.lastLogRange = NSRange(location: ts.length - (line as NSString).length, length: (line as NSString).length)
+            }
             if ts.length > 200_000 {
                 ts.deleteCharacters(in: NSRange(location: 0, length: ts.length - 150_000))
+                self.lastLogPlain = nil   // 早期内容被裁掉，range 已失效，重置合并状态
+                self.lastLogRange = NSRange(location: NSNotFound, length: 0)
             }
             self.logView.scrollToEndOfDocument(nil)
         }
