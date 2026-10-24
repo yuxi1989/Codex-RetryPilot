@@ -101,12 +101,14 @@ func ensureSupportDir() {
 let RETRY_TITLES = ["重试", "Retry", "重試"]
 /// 「任务运行中」指示按钮标题（AX 树里出现即视为 Codex 正在执行任务，不算空闲）
 let BUSY_TITLES = ["停止", "Stop", "中止", "Interrupt"]
+/// 「滚动到底部」下箭头按钮标题：视图未在底部时出现，此时窗口外的错误行/按钮读不全，须先滚到底再判定
+let SCROLL_BOTTOM_TITLES = ["滚动到底部", "Scroll to bottom", "滾動到底部"]
 /// 错误行关键字（小写匹配；可在 config.json 的 "errorKeywords" 里覆盖）
 var errorKeywords = ["at capacity"]
 
 /// 应用版本（单一来源，必须与项目版本一致 = README「版本历史」/ git tag）：发版时只改这里，
 /// release.sh 会同步写进 Info.plist，「关于」面板也显示它
-let appVersion = "1.0.1"
+let appVersion = "1.0.2"
 
 /// 项目主页（「关于」面板展示）
 let projectHomepage = URL(string: "https://github.com/yuxi1989/Codex-RetryPilot")!
@@ -155,6 +157,7 @@ struct CodexScan {
     var rows: [ErrorRow] = []
     var buttons: [(el: AXUIElement, rect: CGRect)] = []
     var busy = false // 界面上存在「停止」类按钮 = Codex 正在运行任务
+    var scrollBtn: AXUIElement? // 「滚动到底部」下箭头：出现即代表视图不在底部，读到的界面不全
 }
 
 /// 单次全树遍历同时收集错误行、「重试」按钮与运行中信号，避免一个周期内多次遍历（AX 属性读取是跨进程 IPC，开销大）
@@ -176,6 +179,8 @@ func scanCodex() -> CodexScan {
                 s.buttons.append((el, r))
             } else if BUSY_TITLES.contains(t) {
                 s.busy = true
+            } else if SCROLL_BOTTOM_TITLES.contains(t), s.scrollBtn == nil {
+                s.scrollBtn = el
             }
         }
         if let kids = axAttr(el, kAXChildrenAttribute) as? [AXUIElement] {
@@ -440,18 +445,30 @@ func findCodexTextArea() -> AXUIElement? {
     return found
 }
 
+/// 读取 Codex 输入框当前内容（nil = 输入框不存在）。
+/// 供空闲发送做基线比对：Codex 会把内置建议文案（如「使用 ChatGPT Work」）直接写进 AXValue，
+/// 视觉上是灰色占位，但 AX 读出来是「非空」，不能只凭非空就判定用户在输入。
+func codexInputValue() -> String? {
+    guard let app = codexApp() else { return nil }
+    enableRendererAccessibility(app)
+    guard let ta = findCodexTextArea() else { return nil }
+    return axStr(ta, kAXValueAttribute)
+}
+
 /// 把一行文本写入 Codex 输入框并回车（原生实现，不抢焦点、光标不动）：
-/// 先确认输入框为空（kAXValue 直写会整体覆盖现有内容，非空说明用户可能正在输入，跳过）
+/// 输入框为空 → 直写；非空但与空闲基线一致（多为 Codex 的内置建议文案，非用户输入）→ 清场后直写；
+/// 非空且与基线不同（用户空闲期间放了草稿）→ 跳过，绝不覆盖。
 /// → AX 直写 kAXValue → 回读确认 → AXConfirm（失败则向进程投递 Return 键）→ 读回验证已清空。
 /// 任何一步没确认成功都会把自己写进去的内容清回空——绝不给用户留下半截文字，也不让下一轮永远撞「非空」。
 /// 返回 "sent" / "busy" / "unclear" / "nofield" / "error: ..."。
-func nativeSendLine(_ line: String) -> String {
+func nativeSendLine(_ line: String, baseline: String? = nil) -> String {
     guard let app = codexApp() else { return "nofield" }
     enableRendererAccessibility(app)
     guard let ta = findCodexTextArea() else { return "nofield" }
     let current = axStr(ta, kAXValueAttribute)
-    if !current.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-        return "busy" // 输入框非空，绝不覆盖
+    let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !trimmed.isEmpty, current != baseline {
+        return "busy" // 空闲期开始后内容变了：可能是用户草稿，绝不覆盖
     }
     // 清场：写入前框里可能只有空白符，先归一成空，避免 kAXValue 直写后残留空格导致误判
     if !current.isEmpty {
@@ -469,7 +486,16 @@ func nativeSendLine(_ line: String) -> String {
         _ = postReturnKeyToPid(app.processIdentifier)
     }
     usleep(800_000)
-    let after = axStr(ta, kAXValueAttribute)
+    var after = axStr(ta, kAXValueAttribute)
+    if after == line {
+        // AXConfirm 返回 success 也不代表真的发送（Codex 的输入框对它没反应，假成功）。
+        // Return 键只有输入框持有键盘焦点时才被接收：先 AXFocused=true（不切换前台 app），再向进程投递 Return。
+        AXUIElementSetAttributeValue(ta, "AXFocused" as CFString, kCFBooleanTrue)
+        usleep(200_000)
+        _ = postReturnKeyToPid(app.processIdentifier)
+        usleep(800_000)
+        after = axStr(ta, kAXValueAttribute)
+    }
     if after != line { return "sent" } // 输入框内容已变化（通常被清空）即视为发出
     // 800ms 后这一行仍原样留在框里 = 没送出去。清空它，否则下一轮会被判「非空」而永久卡住
     AXUIElementSetAttributeValue(ta, kAXValueAttribute as CFString, "" as CFString)
@@ -1427,8 +1453,15 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
             var skyDeadUntil = Date.distantPast       // 该策略短期停用截止时间
             var clickCooldownUntil = Date.distantPast // 刚触发重试、服务端还没恢复时的冷却截止
             var lastLoggedRowCount = -1               // 只在错误行数变化时打检查日志
+        var rowsStableSince: Date? = nil          // 错误行数上次变化的时刻：数量稳定 ≥60s 视为残留提示，不再挡空闲
+        var stableHintAt = Date.distantPast       // 「残留错误视为空闲」提示的节流
+        var scrollHintAt = Date.distantPast       // 「滚动到底」提示的节流
+        var lastScrollPressAt = Date.distantPast  // 滚动按压节流：用户可能正往上翻历史，不要太频繁拽回底部
         var idleSince: Double? = nil   // 单调时钟打点（秒），见 nowTick()
+        var idleBaseline: String? = nil // 空闲期开始时的输入框内容；期间没变化才允许覆盖发送（Codex 会往输入框塞建议文案，AXValue 非空但不是用户输入）
         var idleSendIdx = 0
+        var postSendHoldUntil: Double? = nil // 发送间隔保护：上一行发出后，下一行至少间隔 max(空闲分钟, 5) 分钟，
+                                             // 防止「运行中停止按钮未被识别为 busy」时任务没跑完就发下一条
 
         while running && Date() < deadline {
             let interval = currentInterval // 每轮实时读取，失焦修改立即生效
@@ -1442,24 +1475,62 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
                 continue
             }
             _ = codex
-            let scan = scanCodex()
+            var scan = scanCodex()
+            // 视图未滚到底（出现「滚动到底部」下箭头）时，窗口外的错误行/按钮读不全，
+            // 直接判定会漏判「重试」按钮、也可能误判空闲。先滚到底、稍等渲染、重扫一次再用新数据判定。
+            if scan.scrollBtn != nil, Date().timeIntervalSince(lastScrollPressAt) > 5 {
+                lastScrollPressAt = Date()
+                if AXUIElementPerformAction(scan.scrollBtn!, kAXPressAction as CFString) == .success {
+                    if Date().timeIntervalSince(scrollHintAt) > 120 {
+                        scrollHintAt = Date()
+                        appendLog(L("⬇️ View not at bottom (scroll-to-bottom shown); scrolled down and rescanning",
+                                    "⬇️ 界面未滚到底（出现下箭头），已滚动到底并重新读取"))
+                    }
+                    usleep(700_000)
+                    scan = scanCodex()
+                }
+            }
             let rows = scan.rows
             // 日志原则：只打结论。错误行数没变就不刷屏；打印时只记「从多少变到多少」
             if rows.count != lastLoggedRowCount {
                 let transition = lastLoggedRowCount >= 0 ? " \(lastLoggedRowCount)→\(rows.count) " : " \(rows.count) "
                 lastLoggedRowCount = rows.count
+                rowsStableSince = Date()   // 数量变了：稳定计时重新起算
                 appendLog(L("⏱ Error lines:\(transition)", "⏱ 错误行 \(transition)条"))
             }
             // 空闲的判定：无错误行、无「重试」按钮、无运行中任务（「停止」类按钮）。
             // 少了「重试按钮」这一条会有漏洞：错误行文字没命中关键字但按钮在时，会被误判成空闲。
+            // 例外：错误行数量稳定 ≥60 秒且无按钮、无任务 → 是残留的历史错误文字（如已恢复的 at capacity 提示），
+            // 不是「忙」。否则残留错误会让空闲计时永不开始，空闲自动发送永远不触发。
+            let rowsStableSec = rowsStableSince.map { Date().timeIntervalSince($0) } ?? 0
+            let residualIdle = !rows.isEmpty && scan.buttons.isEmpty && !scan.busy && rowsStableSec >= 60
+            if residualIdle, Date().timeIntervalSince(stableHintAt) > 120 {
+                stableHintAt = Date()
+                appendLog(L("ℹ️ \(rows.count) leftover error line(s), no \"Retry\" button, stable for 60s — treating as idle",
+                            "ℹ️ 错误行 \(rows.count) 条已稳定 60 秒且无「重试」按钮，视为空闲（残留提示不影响发送）"))
+            }
             let isIdle = rows.isEmpty && scan.buttons.isEmpty && !scan.busy
-            if !isIdle { idleSince = nil }
-            guard let last = rows.map({ $0.rect }).max(by: { $0.minY < $1.minY }) else {
+            if !isIdle && !residualIdle { idleSince = nil; idleBaseline = nil }
+            guard let last = rows.map({ $0.rect }).max(by: { $0.minY < $1.minY }), !residualIdle else {
                 // 无错误行：Codex 空闲（无重试按钮、无错误、无运行中任务）
                 if idleSendEnabled, idleMin > 0 {
                     let now = nowTick()
                     if idleSince == nil { idleSince = now }
                     let idleSec = now - idleSince!
+                    // 维护空闲基线：空闲期间输入框内容变了（用户草稿 / Codex 换了建议文案）→
+                    // 更新基线并重新计满 N 分钟，绝不覆盖空闲开始后新出现的内容
+                    var baselineChanged = false
+                    if let cur = codexInputValue() {
+                        if let base = idleBaseline {
+                            if cur != base {
+                                idleBaseline = cur
+                                idleSince = now
+                                baselineChanged = true
+                            }
+                        } else {
+                            idleBaseline = cur
+                        }
+                    }
                     let lines = script
                     if !lines.isEmpty, idleSendIdx >= lines.count {
                         // 指令用完了：提示一次，避免用户以为还在发
@@ -1468,24 +1539,29 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
                             appendLog(L("✅ All \(lines.count) command lines sent; nothing left to send",
                                         "✅ \(lines.count) 行指令已全部发送完毕，不再发送"))
                         }
-                    } else if idleSec >= idleMin * 60, idleSendIdx < lines.count {
+                    } else if baselineChanged {
+                        // 基线这轮刚更新：内容是新的，本轮绝不发送（重新计满 N 分钟后再看）
+                    } else if idleSec >= idleMin * 60, idleSendIdx < lines.count,
+                              postSendHoldUntil == nil || now >= postSendHoldUntil! {
                         let line = lines[idleSendIdx]
                         appendLog(L("💬 Codex idle for \(Int(idleSec / 60)) min, sending line \(idleSendIdx + 1)/\(lines.count)…",
                                     "💬 Codex 已空闲 \(Int(idleSec / 60)) 分钟，发送第 \(idleSendIdx + 1)/\(lines.count) 行…"))
-                        let r = nativeSendLine(line)
+                        let r = nativeSendLine(line, baseline: idleBaseline)
                         switch r {
                         case "sent":
                             idleSendIdx += 1
                             idleSince = now        // 下一行同样要再空闲 N 分钟
+                            postSendHoldUntil = now + max(Double(idleMin) * 60, 300) // 发送间隔保护：即使 busy 识别失效，两次发送至少隔 5 分钟
+                            idleBaseline = nil     // 发送后框里已是新状态（被清空/换建议），下轮重新采样
                             appendLog(L("✅ Idle send done | line \(idleSendIdx)/\(lines.count) sent (cursor untouched)",
                                         "✅ 空闲发送完成｜第 \(idleSendIdx)/\(lines.count) 行已发（光标未动）"))
                         case "busy":
-                            // 输入框非空（用户可能正在输入），绝不覆盖；60 秒后再看一次，不必重等满 N 分钟
+                            // 空闲基线比对没通过：内容确实是空闲开始后新出现的，绝不覆盖；60 秒后再看
                             idleSince = now - idleMin * 60 + 60
                             if now - busyHintAt > 60 {
                                 busyHintAt = now
-                                appendLog(L("ℹ️ Input box not empty (you may be typing); will retry in ~60s",
-                                            "ℹ️ 输入框非空（可能你正在输入），约 60 秒后再试"))
+                                appendLog(L("ℹ️ Input box has unsent content (possibly your draft); will retry in ~60s",
+                                            "ℹ️ 输入框有未发送内容（可能是草稿），不覆盖，约 60 秒后再试"))
                             }
                         case "nofield":
                             idleSince = now - idleMin * 60 + 60
