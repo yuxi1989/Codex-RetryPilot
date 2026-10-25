@@ -105,10 +105,13 @@ let BUSY_TITLES = ["停止", "Stop", "中止", "Interrupt"]
 let SCROLL_BOTTOM_TITLES = ["滚动到底部", "Scroll to bottom", "滾動到底部"]
 /// 错误行关键字（小写匹配；可在 config.json 的 "errorKeywords" 里覆盖）
 var errorKeywords = ["at capacity"]
+/// 「用量上限」关键字（小写匹配）：命中说明套餐额度用完、点重试无效，只能等额度重置。
+/// 此状态暂停点击与空闲发送，也不算空闲（和 at capacity 的瞬时错误分开处理）
+let LIMIT_KEYWORDS = ["使用上限", "额度已用完", "usage limit"]
 
 /// 应用版本（单一来源，必须与项目版本一致 = README「版本历史」/ git tag）：发版时只改这里，
 /// release.sh 会同步写进 Info.plist，「关于」面板也显示它
-let appVersion = "1.0.2"
+let appVersion = "1.0.3"
 
 /// 项目主页（「关于」面板展示）
 let projectHomepage = URL(string: "https://github.com/yuxi1989/Codex-RetryPilot")!
@@ -155,6 +158,7 @@ struct ErrorRow { let rect: CGRect }
 
 struct CodexScan {
     var rows: [ErrorRow] = []
+    var limitTexts: [String] = [] // 「用量上限」命中的原文（解析额度重置时间用）
     var buttons: [(el: AXUIElement, rect: CGRect)] = []
     var busy = false // 界面上存在「停止」类按钮 = Codex 正在运行任务
     var scrollBtn: AXUIElement? // 「滚动到底部」下箭头：出现即代表视图不在底部，读到的界面不全
@@ -168,10 +172,14 @@ func scanCodex() -> CodexScan {
         if depth > 60 { return }
         let role = axStr(el, kAXRoleAttribute)
         if role == "AXStaticText" {
-            let txt = axStr(el, kAXValueAttribute).lowercased()
+            let raw = axStr(el, kAXValueAttribute)
+            let txt = raw.lowercased()
             if errorKeywords.contains(where: { txt.contains($0) }),
                let r = axRect(el), r.height > 5 {
                 s.rows.append(ErrorRow(rect: r))
+            }
+            if LIMIT_KEYWORDS.contains(where: { txt.contains($0) }) {
+                s.limitTexts.append(raw)
             }
         } else if role == "AXButton", let r = axRect(el), r.height > 8 {
             let t = axStr(el, kAXTitleAttribute)
@@ -319,6 +327,53 @@ func retryButton(from scan: CodexScan, near row: CGRect) -> (el: AXUIElement, re
         .filter { abs($0.rect.midY - row.midY) < 30 }
         .max(by: { $0.rect.minY < $1.rect.minY })
         .map { (el: $0.el, rect: $0.rect) }
+}
+
+func regexLast(_ pattern: String, _ s: String) -> [String]? {
+    guard let re = try? NSRegularExpression(pattern: pattern) else { return nil }
+    let ns = s as NSString
+    let ms = re.matches(in: s, range: NSRange(location: 0, length: ns.length))
+    guard let m = ms.last else { return nil }
+    return (1..<m.numberOfRanges).map { m.range(at: $0).location == NSNotFound ? "" : ns.substring(with: m.range(at: $0)) }
+}
+
+/// 从「用量上限」文案解析额度重置时间（取最后一条匹配 = 最新的提示）：
+/// 中文「在 2026年10月25日 00:14后重试」「将于 10月25日 0:14 重置」；
+/// 英文「will reset at 4:00 PM」。解析失败返回 nil。
+func parseLimitResetText(_ raw: String) -> Date? {
+    let s = raw.replacingOccurrences(of: "\n", with: " ")
+    let cal = Calendar.current
+    let now = Date()
+    var c = DateComponents()
+    if let g = regexLast("(\\d{4})\\s*年\\s*(\\d{1,2})\\s*月\\s*(\\d{1,2})\\s*日\\s*(\\d{1,2}):(\\d{2})", s), g.count == 5 {
+        c.year = Int(g[0]); c.month = Int(g[1]); c.day = Int(g[2])
+        c.hour = Int(g[3]); c.minute = Int(g[4])
+        return cal.date(from: c)
+    }
+    if let g = regexLast("(\\d{1,2})\\s*月\\s*(\\d{1,2})\\s*日\\s*(\\d{1,2}):(\\d{2})", s), g.count == 4 {
+        c.year = cal.component(.year, from: now)
+        c.month = Int(g[0]); c.day = Int(g[1]); c.hour = Int(g[2]); c.minute = Int(g[3])
+        return cal.date(from: c)
+    }
+    if let g = regexLast("reset[^0-9]{0,30}(\\d{1,2}):(\\d{2})\\s*([APap])\\.?\\s?M\\.?", s), g.count == 3 {
+        var h = Int(g[0]) ?? 0
+        let pm = g[2].uppercased() == "P"
+        if pm, h < 12 { h += 12 }
+        if !pm, h == 12 { h = 0 }
+        c.year = cal.component(.year, from: now)
+        c.month = cal.component(.month, from: now)
+        c.day = cal.component(.day, from: now)
+        c.hour = h; c.minute = Int(g[1]) ?? 0
+        return cal.date(from: c)
+    }
+    return nil
+}
+
+func fmtMDHM(_ d: Date) -> String {
+    let f = DateFormatter()
+    f.locale = Locale(identifier: "en_US_POSIX") // 固定数字格式，不随系统区域漂移
+    f.dateFormat = "MM-dd HH:mm"
+    return f.string(from: d)
 }
 
 /// 强制开启 Codex(Electron/Chromium) 渲染进程的无障碍支持。
@@ -514,6 +569,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
     var idleSendCheck: NSSwitch!
     var scriptView: NSTextView!
     var idleStopCheck: NSSwitch!
+    var limitPauseCheck: NSSwitch! // 「用量上限时暂停重试与空闲发送」
     var soundCheck: NSSwitch!
     var silentSeg: NSSegmentedControl!
     var clickModeNote: NSTextField!
@@ -928,7 +984,12 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         silentSeg.segmentStyle = .rounded
         silentSeg.toolTip = L("Silent: Accessibility press → native background click → coordinate click as a last resort (never touches your cursor unless everything else fails). Compatible: coordinate click only (briefly moves the cursor) — use it if pressing has no effect on your machine.",
                               "静默：无障碍按压 → 原生后台点击 → 实在不行才坐标点击（几乎不会动你的光标）。兼容：只用坐标点击（会短暂移动光标），按压在本机不起作用时选它。")
-        let clickModeRow = NSStackView(views: [formLabel(L("Click mode", "点击方式")), silentSeg])
+        let clickModeBadge = HelpBadge(
+            title: L("Click mode", "点击方式"),
+            tip: silentSeg.toolTip ?? "",
+            example: L("Silent = press → background click → coordinate click as a last resort, barely touches your cursor; Compatible = coordinate click only, briefly moves the cursor. Choose Compatible if pressing never works on your machine.",
+                       "静默＝按压→后台点击→坐标点击三级兜底，基本不动你的鼠标；兼容＝只用坐标点击，会短暂抢光标。按压总不生效的机器选兼容。"))
+        let clickModeRow = NSStackView(views: [formLabel(L("Click mode", "点击方式")), silentSeg, clickModeBadge])
         clickModeRow.orientation = .horizontal
         clickModeRow.spacing = 8
 
@@ -938,21 +999,39 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
 
         noSleepCheck = NSSwitch()
         noSleepCheck.state = .on
-        let noSleepRow = switchRow(noSleepCheck, L("Prevent display sleep", "防止系统息屏"),
-                                   tip: L("Keeps the screen on via a power assertion; manual lid-close/lock is unaffected", "通过电源断言保持亮屏；手动合盖/锁屏不受影响"))
+        let noSleepRow = switchRow(noSleepCheck, L("Keep display awake while monitoring", "监控期间防止息屏"),
+                                   tip: L("Keeps the screen on via a power assertion while monitoring; released on stop", "监控运行时通过电源断言保持亮屏，停止后立即解除"),
+                                   example: L("Overnight unattended retry runs — without it the display sleeps, screenshots fail, and retrying only resumes after wake. Manual power-off and lock screen (⌘⌃Q) are NOT covered: monitoring pauses until the screen returns.",
+                                              "挂机通宵等重试——不开的话屏幕休眠后截图失败，要等亮屏才继续点。手动关屏、锁屏（⌘+控制+Q）不受保护：监控会暂停到屏幕恢复。"))
 
         idleStopCheck = NSSwitch()
         idleStopCheck.state = .on
-        let idleStopRow = switchRow(idleStopCheck, L("Auto-stop after 10 min without errors", "连续 10 分钟无错误自动停止"))
+        let idleStopRow = switchRow(idleStopCheck, L("Auto-stop after 10 idle minutes", "10 分钟无错误自动停止"),
+                                    tip: L("Stops monitoring when no error line is seen for 10 consecutive minutes", "连续 10 分钟看不到错误行就自动停止监控"),
+                                    example: L("Session recovered while you're away — the app calls it a day by itself. Does not apply when \"Idle auto-send\" is on (it takes over).",
+                                               "会话已恢复、你在忙别的——app 自己收工，不用回来手动点停止。开着「空闲自动发送」时此项自动让位（不生效）。"))
+        limitPauseCheck = NSSwitch()
+        limitPauseCheck.state = .on
+        let limitPauseRow = switchRow(limitPauseCheck,
+                                      L("Pause when usage limit is hit", "用量上限时暂停，等额度重置"),
+                                      tip: L("When Codex shows \"usage limit reached\": stop clicking Retry and idle auto-send (they can't work), wait for the quota reset time parsed from the message, then resume. Never presses \"Reset usage\" — that one-time reset is yours to spend",
+                                             "识别到「用量已达上限」时：暂停点重试和空闲发送（发了也无效），等从文案里解析出的额度重置时间后自动恢复。不会代点「重置使用量」（一次性机会留给你）"),
+                                      example: L("Seeing \"usage limit reached… retry after 00:14\": ON = pause until 00:14 then resume; OFF = old behavior, idle auto-send may fire into the limited session. Never presses \"Reset usage\" either way.",
+                                                 "看到「用量已达上限…00:14 后重试」：开启则暂停到 00:14 后自动恢复；关闭则按旧逻辑跑，可能把空闲指令白发进受限会话。无论开关与否都不代点「重置使用量」。"))
         soundCheck = NSSwitch()
         soundCheck.state = .on
-        let soundRow = switchRow(soundCheck, L("Play sound on stop", "停止时播放提示音"))
+        let soundRow = switchRow(soundCheck, L("Play sound on stop", "停止时播放提示音"),
+                                 tip: L("Plays an alert when monitoring stops (manual or auto)", "监控停止（手动或自动）时播放一声提示"),
+                                 example: L("Hear it and know it's time to check back; turn it off for meetings or at night.",
+                                            "听到声音就知道该回来看了；开会/深夜可关。"))
         autoLearnCheck = NSSwitch()
         autoLearnCheck.state = .on
-        let autoLearnRow = switchRow(autoLearnCheck, L("Auto-adapt if the Codex UI changes", "Codex 界面更新后自动适配按钮"),
-                                     tip: L("When matching fails, capture the new button appearance as a template", "匹配失败时自动收录新按钮外观为模板"))
+        let autoLearnRow = switchRow(autoLearnCheck, L("Auto-learn new button styles", "自动学习新按钮样式"),
+                                     tip: L("When matching fails, capture the new button appearance as a template", "匹配失败时自动收录新按钮外观为模板"),
+                                     example: L("Codex redesigns its \"Retry\" button — usually self-heals unattended. OFF: you must click \"Calibrate\" yourself.",
+                                                "Codex 改版导致「重试」按钮变色——开启通常无人值守自愈；关闭则需要你手动点「校准按钮」。"))
 
-        let optCol1 = NSStackView(views: [noSleepRow, idleStopRow])
+        let optCol1 = NSStackView(views: [noSleepRow, idleStopRow, limitPauseRow])
         optCol1.orientation = .vertical
         optCol1.alignment = .leading
         optCol1.spacing = 10
@@ -970,13 +1049,12 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
 
         // ── 卡片 4：空闲自动发送 ──
         idleSendCheck = NSSwitch()
-        idleSendCheck.toolTip = L("\"Idle\" means no error line, no \"Retry\" button, and no running task (Stop button) on screen — a running long task is never treated as idle",
-                                  "判定「空闲」：界面上既无错误行、无「重试」按钮，也没有正在运行的任务（「停止」按钮）。长任务运行中不会被误判为空闲")
-        let idleSendTip = idleSendCheck.toolTip
+        let idleSendTip = L("\"Idle\" = no error line, no \"Retry\" button, and no running task on screen", "「空闲」= 界面上既无错误行、无「重试」按钮、也无运行中任务")
         let idleSendRow = switchRow(idleSendCheck,
-                                    L("Idle auto-send: send the next command line",
-                                      "空闲时自动发送下一行指令"),
-                                    tip: idleSendTip)
+                                    L("Idle auto-send: send the next command line", "空闲时自动发送下一行指令"),
+                                    tip: idleSendTip,
+                                    example: L("Feeds a multi-line script to Codex one by one for long tasks; two sends are at least 5 minutes apart; your own draft in the input box is never overwritten. Won't fire while usage-limited (unless that pause switch is off).",
+                                               "多行脚本指令逐条喂给 Codex 跑长任务；两次发送至少隔 5 分钟；绝不覆盖你手打的草稿。用量上限暂停期间不发送（除非关掉「用量上限时暂停」开关）。"))
         idleSendCheck.target = self
         idleSendCheck.action = #selector(idleSendToggled)
 
@@ -1107,14 +1185,110 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
     }
 
     /// 开关 + 说明文字行
-    private func switchRow(_ sw: NSSwitch, _ text: String, tip: String? = nil) -> NSStackView {
+    /// 「！」帮助徽标：悬停 0.5 秒弹出 NSPopover 说明气泡，移开即收起。
+    /// 不用系统 toolTip：部分 macOS 版本对 label 类视图的 tooltip 有不显示的 bug，且无法保证生效。
+    final class HelpBadge: NSView {
+        private let popover = NSPopover()
+        private var showItem: DispatchWorkItem?
+
+        /// 气泡排版：标题（开关名，加粗）→ 说明 → 举例（次级色），三段分层，内容宽 330
+        init(title: String, tip: String, example: String) {
+            super.init(frame: NSRect(x: 0, y: 0, width: 15, height: 15))
+            let contentW: CGFloat = 330, padX: CGFloat = 14, padY: CGFloat = 12, gap: CGFloat = 6
+            func makeLabel(_ s: String, size: CGFloat, color: NSColor, bold: Bool = false) -> NSTextField {
+                let l = NSTextField(wrappingLabelWithString: s)
+                l.font = bold ? .systemFont(ofSize: size, weight: .semibold) : .systemFont(ofSize: size)
+                l.textColor = color
+                l.isSelectable = false
+                l.preferredMaxLayoutWidth = contentW
+                l.widthAnchor.constraint(lessThanOrEqualToConstant: contentW).isActive = true
+                return l
+            }
+            let segs: [(String, CGFloat, NSColor, Bool)] = [
+                (title, 12, .labelColor, true),
+                (tip, 11, .labelColor, false),
+                (example.isEmpty ? "" : L("Examples: ", "举例：") + example, 11, .secondaryLabelColor, false),
+            ].filter { !$0.0.isEmpty }
+            let stack = NSStackView(views: segs.map { makeLabel($0.0, size: $0.1, color: $0.2, bold: $0.3) })
+            stack.orientation = .vertical
+            stack.alignment = .leading
+            stack.spacing = gap
+            stack.edgeInsets = NSEdgeInsets(top: padY, left: padX, bottom: padY, right: padX)
+            stack.translatesAutoresizingMaskIntoConstraints = false
+            let root = NSView()
+            root.addSubview(stack)
+            NSLayoutConstraint.activate([
+                stack.topAnchor.constraint(equalTo: root.topAnchor),
+                stack.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+                stack.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+                stack.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            ])
+            let vc = NSViewController()
+            vc.view = root
+            // 高度自己按文字度量算，显式给 preferredContentSize：
+            // NSPopover 首帧时 autolayout 还没跑完，靠 fittingSize 会先弹成细条、尺寸也不稳
+            func textH(_ s: String, size: CGFloat, bold: Bool) -> CGFloat {
+                let font = bold ? NSFont.systemFont(ofSize: size, weight: .semibold) : NSFont.systemFont(ofSize: size)
+                return ceil((s as NSString).boundingRect(
+                    with: NSSize(width: contentW, height: .greatestFiniteMagnitude),
+                    options: [.usesLineFragmentOrigin, .usesFontLeading],
+                    attributes: [.font: font]).height)
+            }
+            let h = segs.reduce(padY * 2) { $0 + textH($1.0, size: $1.1, bold: $1.3) } + CGFloat(segs.count - 1) * gap
+            vc.preferredContentSize = NSSize(width: contentW + padX * 2, height: h)
+            popover.contentViewController = vc
+            popover.behavior = .transient   // 点击气泡外任意处也会收起
+        }
+
+        required init?(coder: NSCoder) { fatalError("not used") }
+
+        override var intrinsicContentSize: NSSize { NSSize(width: 15, height: 15) }
+
+        override func draw(_ dirtyRect: NSRect) {
+            NSColor.secondaryLabelColor.withAlphaComponent(0.15).setFill()
+            NSBezierPath(ovalIn: bounds.insetBy(dx: 0.5, dy: 0.5)).fill()
+            let para = NSMutableParagraphStyle()
+            para.alignment = .center
+            let s = NSAttributedString(string: "!", attributes: [
+                .font: NSFont.systemFont(ofSize: 9, weight: .bold),
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .paragraphStyle: para,
+            ])
+            let sz = s.size()
+            s.draw(at: NSPoint(x: (bounds.width - sz.width) / 2, y: (bounds.height - sz.height) / 2))
+        }
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            for t in trackingAreas { removeTrackingArea(t) }
+            addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                           owner: self, userInfo: nil))
+        }
+
+        override func mouseEntered(with event: NSEvent) {
+            let item = DispatchWorkItem { [weak self] in
+                guard let self, let w = self.window, !self.popover.isShown else { return }
+                // 0.5 秒后鼠标仍在这枚徽标上才弹出（移走/快速划过不弹）
+                let p = self.convert(w.convertPoint(fromScreen: NSEvent.mouseLocation), from: nil)
+                guard self.bounds.insetBy(dx: -4, dy: -4).contains(p) else { return }
+                self.popover.show(relativeTo: self.bounds, of: self, preferredEdge: .maxY)
+            }
+            showItem = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: item)
+        }
+
+        override func mouseExited(with event: NSEvent) {
+            showItem?.cancel()
+            if popover.isShown { popover.performClose(nil) }
+        }
+    }
+
+    private func switchRow(_ sw: NSSwitch, _ text: String, tip: String? = nil, example: String? = nil) -> NSStackView {
         let l = NSTextField(labelWithString: text)
         l.font = .systemFont(ofSize: 13)
-        if let tip {
-            sw.toolTip = tip
-            l.toolTip = tip
-        }
-        let r = NSStackView(views: [sw, l])
+        var views: [NSView] = [sw, l]
+        if let example { views.append(HelpBadge(title: text, tip: tip ?? "", example: example)) }
+        let r = NSStackView(views: views)
         r.orientation = .horizontal
         r.spacing = 8
         r.alignment = .centerY
@@ -1436,6 +1610,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         let idleMin = cfg.idleMinutes
         let script = cfg.script
         let idleStop = cfg.idleStopEnabled && !idleSendEnabled // 空闲发送启用时，无错误自动停止让位
+        let limitPause = cfg.limitPauseEnabled // 「用量上限时暂停」开关；关闭则照旧逻辑走（空闲发送可能白发指令，用户自担）
         if idleSendEnabled, cfg.idleStopEnabled {
             appendLog(L("ℹ️ Idle auto-send is enabled; \"auto-stop after 10 min without errors\" is suspended for this run",
                         "ℹ️ 空闲自动发送已启用，「连续 10 分钟无错误自动停止」本轮不生效"))
@@ -1462,6 +1637,10 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         var idleSendIdx = 0
         var postSendHoldUntil: Double? = nil // 发送间隔保护：上一行发出后，下一行至少间隔 max(空闲分钟, 5) 分钟，
                                              // 防止「运行中停止按钮未被识别为 busy」时任务没跑完就发下一条
+        var limitRowsCount = -1              // 「用量上限」文本条数上次值：条数变化才重置稳定计时
+        var limitStableSince: Date? = nil    // 上限文本稳定计时：解析不出重置时间且稳定 10 分钟 → 视为残留历史文案
+        var limitWasActive = false           // 上一轮是否处于上限状态：「已解除」日志只打一次
+        var limitHintAt = Date.distantPast   // 上限提示节流
 
         while running && Date() < deadline {
             let interval = currentInterval // 每轮实时读取，失焦修改立即生效
@@ -1511,6 +1690,43 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
             }
             let isIdle = rows.isEmpty && scan.buttons.isEmpty && !scan.busy
             if !isIdle && !residualIdle { idleSince = nil; idleBaseline = nil }
+            // ── 用量上限（套餐额度用完）：点重试无效，暂停点击与空闲发送，等额度重置 ──
+            // 界面上有「重试」按钮时不算（那说明当前是 at capacity 瞬时错误，照常处理）；
+            // 解析出重置时间则等到重置为止，解析不出则最多等 10 分钟（之后按残留文案处理，避免卡死）。
+            // 开关关闭时整段跳过，恢复旧行为（可能误判空闲、白发指令）。
+            if scan.limitTexts.count != limitRowsCount {
+                limitRowsCount = scan.limitTexts.count
+                limitStableSince = Date()
+            }
+            let limitStable = limitStableSince.map { Date().timeIntervalSince($0) >= 600 } ?? false
+            // 多条上限文案（含历史）时优先取未来的最大重置时间，不依赖 AX 树遍历顺序；
+            // 全部在过去则取最后一条的解析结果（= 已过期 → 不算激活，按残留文案处理）
+            let limitReset: Date? = {
+                let parsed = scan.limitTexts.compactMap(parseLimitResetText)
+                if let future = parsed.filter({ $0 > Date() }).max() { return future }
+                return parsed.last
+            }()
+            let limitActive = limitPause && !scan.limitTexts.isEmpty && scan.buttons.isEmpty
+                && (limitReset.map { Date() < $0 } ?? !limitStable)
+            if limitActive {
+                if !limitWasActive {
+                    limitWasActive = true
+                    let until = limitReset.map { "，预计 " + fmtMDHM($0) + " 重置" } ?? ""
+                    appendLog(L("⏸ Usage limit reached; retry clicks and idle auto-send paused until the quota resets\(until). Won't press \"Reset usage\" — that one-time reset is yours to spend",
+                                "⏸ 用量已达上限，暂停重试与空闲发送，等额度重置\(until)后自动恢复。不会代点「重置使用量」（一次性机会留给你）"))
+                } else if Date().timeIntervalSince(limitHintAt) > 600 {
+                    appendLog(L("⏸ Still usage-limited; waiting for quota reset", "⏸ 仍处于用量上限状态，继续等待额度重置"))
+                }
+                limitHintAt = Date()
+                idleSince = nil; idleBaseline = nil
+                lastErrorAt = Date() // 等待重置期间不算「无错误」，避免触发「10 分钟无错误自动停止」
+                sleepSec(interval)
+                continue
+            }
+            if limitWasActive {
+                limitWasActive = false
+                appendLog(L("✅ Usage limit cleared; resuming normal monitoring", "✅ 额度上限已解除，恢复正常监控"))
+            }
             guard let last = rows.map({ $0.rect }).max(by: { $0.minY < $1.minY }), !residualIdle else {
                 // 无错误行：Codex 空闲（无重试按钮、无错误、无运行中任务）
                 if idleSendEnabled, idleMin > 0 {
@@ -1925,6 +2141,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         var silentClick = true
         var autoLearn = true
         var idleStopEnabled = true   // 用户是否勾选「连续 10 分钟无错误自动停止」
+        var limitPauseEnabled = true // 用户是否勾选「用量上限时暂停，等额度重置」
     }
 
     func snapshotRunConfig() -> RunConfig {
@@ -1941,7 +2158,8 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
                          script: scriptLines(),
                          silentClick: silentSeg.selectedSegment == 0,
                          autoLearn: autoLearnCheck.state == .on,
-                         idleStopEnabled: idleStopCheck.state == .on)
+                         idleStopEnabled: idleStopCheck.state == .on,
+                         limitPauseEnabled: limitPauseCheck.state == .on)
     }
 
     func collectConfig() -> [String: Any] {
@@ -1953,6 +2171,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
             "silentClick": silentSeg.selectedSegment == 0,
             "noSleep": noSleepCheck.state == .on,
             "idleStop": idleStopCheck.state == .on,
+            "limitPause": limitPauseCheck.state == .on,
             "sound": soundCheck.state == .on,
             "autoLearn": autoLearnCheck.state == .on,
             "idleSendEnabled": idleSendCheck.state == .on,
@@ -1980,6 +2199,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         }
         st("noSleep", noSleepCheck)
         st("idleStop", idleStopCheck)
+        st("limitPause", limitPauseCheck)
         st("sound", soundCheck)
         st("autoLearn", autoLearnCheck)
         st("idleSendEnabled", idleSendCheck)
