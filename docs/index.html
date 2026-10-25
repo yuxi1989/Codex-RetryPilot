@@ -340,31 +340,36 @@
     <div class="wrap">
       <p class="kicker" data-en="What it does">功能</p>
       <h2 data-en="One small tool. One annoying problem solved.">一个小工具，解决一个烦人的问题。</h2>
-      <div class="grid g3" style="margin-top:32px">
+      <div class="grid g2" style="margin-top:32px">
         <div class="card">
           <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12a9 9 0 1 0 3.4-7"/><path d="M3 4v5h5"/></svg></div>
           <h3 data-en="Auto Retry">自动重试</h3>
-          <p data-en="Polls the Codex window, finds the capacity error, presses Retry, then checks the button state to avoid false positives.">轮询 Codex 窗口，发现容量错误就点击「重试」，点完检查按钮状态，减少误判与无效操作。</p>
+          <p data-en="Finds the capacity error and presses Retry for you — then verifies it actually worked.">发现容量错误就自动点「重试」，点完还会确认真的生效。</p>
         </div>
         <div class="card">
           <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4l7 8-7 8"/><path d="M13 4l7 8-7 8"/></svg></div>
           <h3 data-en="Silent Background">静默后台</h3>
-          <p data-en="Prefers accessibility presses and native background clicks. No cursor movement, no app switching — you can keep typing elsewhere.">优先使用辅助功能按压与原生后台点击。不改光标位置、不切换前台应用，你在别的窗口打字不受影响。</p>
+          <p data-en="Never moves your cursor or steals focus — keep working in other windows.">全程不动你的鼠标、不抢焦点，别的窗口照常干活。</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
+          <h3 data-en="Quota-aware waiting">额度等待</h3>
+          <p data-en="Hits the usage limit? It pauses, waits for the quota reset, then resumes. Your one-time &quot;Reset usage&quot; stays yours.">额度用完就暂停，等重置时间一到自动继续；一次性「重置使用量」机会留给你。</p>
         </div>
         <div class="card">
           <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h10M4 18h7"/></svg></div>
           <h3 data-en="Command Queue">指令接力</h3>
-          <p data-en="Optionally sends the next queued instruction once Codex has been idle for the configured time — useful for multi-step prompt chains.">Codex 空闲达到设定时长后，自动发送指令队列里的下一条。跑多步 prompt 链时不用守着屏幕。</p>
+          <p data-en="Sends the next queued instruction after Codex idles for your set time — perfect for multi-step tasks.">空闲几分钟后自动发下一条指令，多步任务不用守着。</p>
         </div>
       </div>
       <div class="grid g2" style="margin-top:16px">
         <div class="card">
           <h3 data-en="Unattended operation">无人值守</h3>
-          <p data-en="Set the check interval and run duration; the app keeps waiting while Codex recovers, and stops itself when the timer ends.">自定义检测间隔与运行时长，让长任务持续等待恢复；到时自动停止，不用挂心。</p>
+          <p data-en="Set an interval and duration, then walk away — it stops itself when time is up.">自定义间隔和时长，到点自动停止，挂机就行。</p>
         </div>
         <div class="card">
           <h3 data-en="Control and visibility">可控与可见</h3>
-          <p data-en="Condensed run log, idle auto-stop, optional sound notification, and JSON config import/export.">精简运行日志、空闲自动停止、可选提示音，配置支持 JSON 导入导出。</p>
+          <p data-en="Clear run log, JSON config import/export.">运行日志一目了然，配置可导入导出。</p>
         </div>
       </div>
     </div>

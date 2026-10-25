@@ -51,6 +51,7 @@ brew install --cask yuxi1989/tap/codex-retrypilot
 ![Codex-RetryPilot 运行界面](docs/app-running.png)
 
 - **自动重试**：检测到模型容量限制错误，自动寻找并点击「重试」。
+- **额度用完也会等**：识别「用量已达上限」状态，自动解析额度重置时间（如「在 00:14 后重试」），暂停操作到点再继续——不白发指令，也不代点「重置使用量」。
 - **静默后台**：优先使用不移动鼠标、不抢占焦点的方式操作。
 - **无人值守**：自定义检测间隔、运行时长，让长任务持续等待恢复。
 - **智能验证**：点击后检查按钮状态，减少误判和无效操作。
@@ -167,6 +168,7 @@ Codex-RetryPilot detects this error, finds the Retry button, and automatically a
 ![Codex-RetryPilot running](docs/app-running.png)
 
 - **Auto Retry** — Detect model capacity errors and automatically trigger Retry.
+- **Usage-limit aware** — Recognizes "usage limit reached", parses the quota reset time (e.g. "retry after 00:14"), pauses until the reset, then resumes. Never spends your one-time "Reset usage" for you.
 - **Silent Background** — Prioritize interactions that do not move your cursor or steal focus.
 - **Unattended Operation** — Configure monitoring intervals and run duration.
 - **Retry Verification** — Check button state after each attempt.
