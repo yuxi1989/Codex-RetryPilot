@@ -121,9 +121,15 @@
 
   .hero{padding:84px 0 20px;text-align:center;position:relative;overflow:hidden}
   .hero:before{
-    content:"";position:absolute;inset:-40% 20% auto 20%;height:520px;
-    background:radial-gradient(ellipse at center, var(--accent-soft), transparent 70%);
-    filter:blur(20px);opacity:.9;pointer-events:none;
+    content:"";position:absolute;inset:-160px 0 auto 0;height:900px;
+    background:
+      radial-gradient(ellipse 640px 500px at 80% 26%, color-mix(in srgb, #7c6bff 15%, transparent), transparent 70%),
+      radial-gradient(ellipse 560px 440px at 6% 88%, color-mix(in srgb, #ffc94d 12%, transparent), transparent 70%),
+      radial-gradient(ellipse 920px 600px at 44% 10%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 72%);
+    filter:blur(30px);pointer-events:none;
+  }
+  @media (prefers-color-scheme: dark){
+    .hero:before{opacity:.5}
   }
   .hero > *{position:relative}
   .eyebrow{
