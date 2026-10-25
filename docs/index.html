@@ -292,7 +292,7 @@
 
 <main>
   <div class="hero wrap">
-    <span class="eyebrow"><span class="dot"></span><span data-en="v1.0.1 · Notarized · MIT License">v1.0.1 · 已公证 · MIT 协议</span></span>
+    <span class="eyebrow"><span class="dot"></span><span id="verBadge" data-en="v1.0.4 · Notarized · MIT License">v1.0.4 · 已公证 · MIT 协议</span></span>
     <h1 data-en="Codex stuck?<br><em>Let it hit Retry itself.</em>">Codex 卡住了？<br><em>让它自己点「重试」。</em></h1>
     <p class="lede" data-en="When Codex answers <code>Selected model is at capacity</code>, RetryPilot finds the Retry button and presses it for you — cursor unmoved, focus untouched, task keeps running in the background.">Codex 弹出 <code>Selected model is at capacity</code> 时，RetryPilot 会找到「重试」按钮替你按下——光标不动、不抢焦点，任务在后台继续。</p>
     <ul class="chips">
@@ -582,6 +582,32 @@
       fallback(text, done);
     }
   });
+})();
+</script>
+<script>
+(function () {
+  // 版本徽标自动更新：从 GitHub latest release 拉版本号，失败则保留写死的兜底值
+  var el = document.getElementById('verBadge');
+  if (!el) return;
+  var ver = '1.0.4'; // 兜底版本（发布时随 release.sh 一起更新；正常情况会被下面的 API 覆盖）
+  function suffix(en) { return en ? ' · Notarized · MIT License' : ' · 已公证 · MIT 协议'; }
+  function render() {
+    var en = document.documentElement.lang === 'en';
+    el.textContent = 'v' + ver + suffix(en);
+    el.dataset.en = 'v' + ver + suffix(true);
+    el.dataset.zh = 'v' + ver + suffix(false);
+  }
+  try {
+    fetch('https://api.github.com/repos/yuxi1989/Codex-RetryPilot/releases/latest', {
+      headers: { 'Accept': 'application/vnd.github+json' }
+    }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+      if (j && j.tag_name) {
+        ver = String(j.tag_name).replace(/^v/, '');
+        render();
+      }
+    }).catch(function () {});
+  } catch (e) {}
+  render();
 })();
 </script>
 <!-- Cloudflare Web Analytics -->
