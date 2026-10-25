@@ -4,13 +4,38 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Codex-RetryPilot — Codex 卡住时，替你点「重试」</title>
-<meta name="description" content="Codex-RetryPilot 是 macOS 小工具：Codex 出现 Selected model is at capacity 时自动找到并点击「重试」。不移动光标、不抢焦点、完全离线，MIT 开源。">
+<meta name="description" content="Codex-RetryPilot 是 macOS 小工具：Codex 出现 Selected model is at capacity 时自动找到并点击「重试」；额度用完自动等待重置，空闲自动发送指令。不移动光标、不抢焦点、完全离线，MIT 开源。">
+<meta name="keywords" content="Codex, at capacity, auto retry, usage limit, quota reset, macOS, OpenAI, open source, 自动重试, 额度等待">
+<link rel="canonical" href="https://retrypilot.runyu.men/">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0e14">
 <link rel="icon" href="app-icon.png">
 <meta property="og:type" content="website">
+<meta property="og:site_name" content="Codex-RetryPilot">
+<meta property="og:url" content="https://retrypilot.runyu.men/">
 <meta property="og:title" content="Codex-RetryPilot — Codex 卡住时，替你点「重试」">
-<meta property="og:description" content="检测 model at capacity 错误并自动点击重试。静默后台、无人值守、完全离线，MIT 开源。">
+<meta property="og:description" content="检测 model at capacity 错误并自动点击重试；额度用完自动等待重置。静默后台、无人值守、完全离线，MIT 开源。">
 <meta property="og:image" content="https://retrypilot.runyu.men/app-running.png">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:locale:alternate" content="en_US">
 <meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Codex-RetryPilot",
+  "alternateName": "Codex 重试助手",
+  "operatingSystem": "macOS 13+",
+  "applicationCategory": "DeveloperApplication",
+  "description": "macOS 小工具：Codex 出现 at capacity 错误时自动点击「重试」，额度用完自动等待重置，空闲自动发送指令。完全离线，MIT 开源。",
+  "softwareVersion": "1.0.4",
+  "license": "https://github.com/yuxi1989/Codex-RetryPilot/blob/main/LICENSE",
+  "url": "https://retrypilot.runyu.men/",
+  "downloadUrl": "https://github.com/yuxi1989/Codex-RetryPilot/releases/latest",
+  "author": { "@type": "Person", "name": "朱晓宇 yuxi1989", "url": "https://github.com/yuxi1989" },
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+}
+</script>
 <style>
   :root{
     --bg:#ffffff;
