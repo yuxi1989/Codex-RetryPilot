@@ -354,7 +354,7 @@
   <section id="pain">
     <div class="wrap narrow center">
       <p class="kicker" data-en="The problem">问题</p>
-      <h2 data-en="You create. It retries.">你负责创造，它负责重试。</h2>
+      <h2 data-en="You create. It retries.">你创造，它重试。</h2>
       <p class="dim" data-en="You hand Codex a long task, go get coffee, and come back to find it stopped here:">给 Codex 安排一个长任务，转头去喝咖啡，回来发现它早就停在这一行：</p>
       <blockquote class="err">Selected model is at capacity. <b>Please try a different model.</b></blockquote>
       <p class="dim" data-en="Worse: it stalls at 3 a.m. and you only find out the next morning. This error does not kill your task — it waits for a single click. And that click is the whole problem.">更糟的是半夜卡住，第二天才发现几个小时白等。这个错误不会让任务失败，它只需要一次点击——而这一次点击，就是全部问题。</p>
@@ -386,13 +386,13 @@
           <h3 data-en="Command Queue">指令接力</h3>
           <p data-en="Sends the next queued instruction after Codex idles for your set time — perfect for multi-step tasks.">空闲几分钟后自动发下一条指令，多步任务不用守着。</p>
         </div>
-      </div>
-      <div class="grid g2" style="margin-top:16px">
         <div class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></div>
           <h3 data-en="Unattended operation">无人值守</h3>
           <p data-en="Set an interval and duration, then walk away — it stops itself when time is up.">自定义间隔和时长，到点自动停止，挂机就行。</p>
         </div>
         <div class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg></div>
           <h3 data-en="Control and visibility">可控与可见</h3>
           <p data-en="Clear run log, JSON config import/export.">运行日志一目了然，配置可导入导出。</p>
         </div>
@@ -404,7 +404,7 @@
     <div class="wrap">
       <p class="kicker" data-en="Click strategy">点击方式</p>
       <h2 data-en="Three tiers. It stops at the first one that works.">三层点击，前一层成功就不往后走。</h2>
-      <p class="dim narrow" data-en="The fallback chain is essentially a list of everything that failed first: buttons that reject synthetic presses, windows hidden behind other windows, Electron trees that go stale after a repaint.">兜底链其实是一份「失败清单」：拒绝合成按压的按钮、被其他窗口遮住的界面、重绘后失效的 Electron 无障碍树。</p>
+      <p class="dim" data-en="The fallback chain is essentially a list of everything that failed first: buttons that reject synthetic presses, windows hidden behind other windows, Electron trees that go stale after a repaint.">兜底链其实是一份「失败清单」：拒绝合成按压的按钮、被其他窗口遮住的界面、重绘后失效的 Electron 无障碍树。</p>
       <ol class="tiers">
         <li>
           <div class="num">1</div>
@@ -437,22 +437,18 @@
         <div>
           <p class="kicker" data-en="Download">下载</p>
           <h2 data-en="No build step. Just download and drag.">不用编译，下载、拖进「应用程序」即可。</h2>
-          <p class="dim" data-en="Universal binary, notarized by Apple with the ticket stapled — double-click to open, no right-click or xattr workaround.">通用二进制，已通过 Apple 公证并装订票据——双击即可打开，不需要右键或 <code>xattr</code> 处理。</p>
-          <p class="dim" data-en="Prefer Homebrew? The one-line command is at the top of this page.">更喜欢 Homebrew？一行命令在页面顶部。</p>
-          <p class="dim" data-en="Verify downloads with: <code>shasum -a 256 -c SHA256SUMS.txt</code>">校验：<code>shasum -a 256 -c SHA256SUMS.txt</code></p>
+          <p class="dim" data-en="Universal binary, notarized by Apple — double-click to open. Verify with <code>shasum -a 256 -c SHA256SUMS.txt</code>">通用二进制，已通过 Apple 公证——双击即可打开。校验：<code>shasum -a 256 -c SHA256SUMS.txt</code></p>
         </div>
         <a class="btn btn-primary" href="https://github.com/yuxi1989/Codex-RetryPilot/releases/latest" data-en="Go to Releases">前往 Releases</a>
       </div>
 
       <div class="grid g2" style="margin-top:40px;gap:40px">
         <div>
-          <h3 style="margin-bottom:16px" data-en="Five steps">五步装好</h3>
+          <h3 style="margin-bottom:16px" data-en="Three steps">三步装好</h3>
           <ol class="steps">
-            <li><span data-en="Download the <code>.dmg</code> (or <code>.zip</code>) from Releases.">从 Releases 下载 <code>.dmg</code>（或 <code>.zip</code>）。</span></li>
-            <li><span data-en="Drag the app into your Applications folder.">把应用拖进「应用程序」文件夹。</span></li>
+            <li><span data-en="Download the <code>.dmg</code> from Releases and drag the app into Applications.">从 Releases 下载 <code>.dmg</code>，把应用拖进「应用程序」。</span></li>
             <li><span data-en="Launch it and grant the permissions macOS asks for.">首次启动，按提示完成授权。</span></li>
-            <li><span data-en="Open the Codex desktop client.">打开 Codex 桌面客户端。</span></li>
-            <li><span data-en="Set the interval and duration, then hit Start.">设置检测间隔与运行时长，点开始运行。</span></li>
+            <li><span data-en="Open the Codex desktop client, set interval and duration, then hit Start.">打开 Codex 桌面客户端，设置间隔与时长，点开始运行。</span></li>
           </ol>
         </div>
         <div>
