@@ -107,11 +107,11 @@ let SCROLL_BOTTOM_TITLES = ["滚动到底部", "Scroll to bottom", "滾動到底
 var errorKeywords = ["at capacity"]
 /// 「用量上限」关键字（小写匹配）：命中说明套餐额度用完、点重试无效，只能等额度重置。
 /// 此状态暂停点击与空闲发送，也不算空闲（和 at capacity 的瞬时错误分开处理）
-let LIMIT_KEYWORDS = ["使用上限", "额度已用完", "usage limit"]
+let LIMIT_KEYWORDS = ["使用上限", "额度已用完", "usage limit", "codex and work usage", "rate limit resets"]
 
 /// 应用版本（单一来源，必须与项目版本一致 = README「版本历史」/ git tag）：发版时只改这里，
 /// release.sh 会同步写进 Info.plist，「关于」面板也显示它
-let appVersion = "1.0.3"
+let appVersion = "1.0.4"
 
 /// 项目主页（「关于」面板展示）
 let projectHomepage = URL(string: "https://github.com/yuxi1989/Codex-RetryPilot")!
@@ -563,7 +563,8 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
 
     var window: NSWindow!
     var durationPopup: NSPopUpButton!
-    var customField: NSTextField!
+    var customHourField: NSTextField! // 运行时长「自定义」：小时
+    var customMinField: NSTextField!  // 运行时长「自定义」：分钟（0–59）
     var intervalField: NSTextField!
     var idleSendField: NSTextField!
     var idleSendCheck: NSSwitch!
@@ -572,17 +573,20 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
     var limitPauseCheck: NSSwitch! // 「用量上限时暂停重试与空闲发送」
     var soundCheck: NSSwitch!
     var silentSeg: NSSegmentedControl!
+    var langSeg: NSSegmentedControl! // 界面语言切换：AUTO=跟随系统 / 中文 / EN
     var clickModeNote: NSTextField!
     var autoLearnCheck: NSSwitch!
     var noSleepCheck: NSSwitch!
     var startBtn: NSButton!
     var stopBtn: NSButton!
     var calibBtn: NSButton!
+    var updateBtn: NSButton! // 「检查更新」：仅手动触发，无后台自动检查
     var permBtn: NSButton!
     var statusChip: ChipView!
     var logView: NSTextView!
     var permAxLabel: ChipView!
-    var durUnitLabel: NSTextField!
+    var durHourLabel: NSTextField!
+    var durMinLabel: NSTextField!
     var idleExtraViews: [NSView] = []
     var permScLabel: ChipView!
     var permAutoLabel: ChipView!
@@ -911,14 +915,29 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 930),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
                           backing: .buffered, defer: false)
-        window.title = "Codex-RetryPilot"
+        window.title = "Codex-RetryPilot v\(appVersion)"
         window.center()
         window.minSize = NSSize(width: 600, height: 760)
+
+        // 点击空白处结束输入（触发失焦 → controlTextDidEndEditing → 自动保存配置）。
+        // NSView 默认不接 first responder，点空白不会自然结束编辑，必须手动兜底。
+        NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] ev in
+            guard let self, let w = ev.window, w === self.window else { return ev }
+            // 正在编辑 = firstResponder 是窗口 field editor，其 delegate 是某个 NSTextField
+            guard let editor = w.firstResponder as? NSTextView,
+                  editor.delegate is NSTextField else { return ev }
+            if let hit = w.contentView?.hitTest(ev.locationInWindow) {
+                let field = editor.delegate as? NSTextField
+                let inSameField = hit === editor || hit === field || (field?.isDescendant(of: hit) ?? false)
+                if !inSameField { w.makeFirstResponder(nil) } // 触发 end editing → 保存
+            }
+            return ev
+        }
 
         let content = NSView()
 
         // ── 头部：一句话说明 + 权限状态胶囊（应用名在窗口标题栏，不再重复大标题）──
-        let subtitle = NSTextField(labelWithString: L("Auto-retries Codex \"at capacity\" errors · optional idle auto-send",
+        let subtitle = NSTextField(labelWithString: L("Auto-retry Codex \"at capacity\" errors — hands-free",
                                                         "自动重试 Codex「at capacity」错误 · 可选空闲自动发送"))
         subtitle.font = .systemFont(ofSize: 12)
         subtitle.textColor = .secondaryLabelColor
@@ -944,20 +963,31 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         durationPopup.target = self
         durationPopup.action = #selector(durationChanged)
 
-        customField = NSTextField(string: "")
-        customField.alignment = .right
-        customField.isEnabled = false
-        customField.isHidden = true
-        customField.placeholderString = "45"
-        customField.toolTip = L("Only applies when run duration is \"Custom\"; unit is minutes", "仅当运行时长选择「自定义」时生效，单位为分钟")
-        customField.delegate = self
-        customField.widthAnchor.constraint(equalToConstant: 56).isActive = true
+        customHourField = NSTextField(string: "")
+        customHourField.alignment = .right
+        customHourField.isEnabled = false
+        customHourField.isHidden = true
+        customHourField.placeholderString = "0"
+        customHourField.toolTip = L("Only applies when run duration is \"Custom\"; hours (0–720)", "仅当运行时长选择「自定义」时生效，单位为小时（0–720）")
+        customHourField.delegate = self
+        customHourField.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        customMinField = NSTextField(string: "")
+        customMinField.alignment = .right
+        customMinField.isEnabled = false
+        customMinField.isHidden = true
+        customMinField.placeholderString = "45"
+        customMinField.toolTip = L("Only applies when run duration is \"Custom\"; minutes (0–59)", "仅当运行时长选择「自定义」时生效，单位为分钟（0–59）")
+        customMinField.delegate = self
+        customMinField.widthAnchor.constraint(equalToConstant: 44).isActive = true
 
-        // 「分钟」后缀只在「自定义」时显示（预设选项自带单位）
-        durUnitLabel = NSTextField(labelWithString: L("min", "分钟"))
-        durUnitLabel.textColor = .secondaryLabelColor
-        durUnitLabel.isHidden = true
-        let durRow = NSStackView(views: [formLabel(L("Run duration", "运行时长")), durationPopup, customField, durUnitLabel])
+        // 「小时/分钟」后缀只在「自定义」时显示（预设选项自带单位）
+        durHourLabel = NSTextField(labelWithString: L("h", "小时"))
+        durHourLabel.textColor = .secondaryLabelColor
+        durHourLabel.isHidden = true
+        durMinLabel = NSTextField(labelWithString: L("min", "分钟"))
+        durMinLabel.textColor = .secondaryLabelColor
+        durMinLabel.isHidden = true
+        let durRow = NSStackView(views: [formLabel(L("Run duration", "运行时长")), durationPopup, customHourField, durHourLabel, customMinField, durMinLabel])
         durRow.orientation = .horizontal
         durRow.spacing = 8
 
@@ -973,7 +1003,18 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         ivRow.orientation = .horizontal
         ivRow.spacing = 8
 
-        let paramsCard = card(icon: "slider.horizontal.3", title: L("Monitoring", "监控参数"), views: [durRow, ivRow])
+        // 界面语言切换（监控参数卡片标题行右侧）：标签本身不翻译；切换即存配置，重启后生效
+        langSeg = NSSegmentedControl(labels: ["AUTO", "中文", "EN"], trackingMode: .selectOne,
+                                     target: self, action: #selector(langChanged))
+        langSeg.selectedSegment = explicitLangPref == "zh" ? 1 : (explicitLangPref == "en" ? 2 : 0)
+        langSeg.segmentStyle = .rounded
+        langSeg.controlSize = .small   // 缩小样式，与 12pt 卡片标题相称
+        langSeg.font = .systemFont(ofSize: 10)
+        langSeg.toolTip = L("UI language: follow system / Chinese / English. Saves the choice and offers to relaunch.",
+                            "界面语言：跟随系统 / 中文 / English。保存选择后可立即重启生效。")
+
+        let paramsCard = card(icon: "slider.horizontal.3", title: L("Monitoring", "监控参数"), views: [durRow, ivRow],
+                              trailing: langSeg)
 
         // ── 卡片 2：点击与运行（点击方式二选一 + 运行开关两列） ──
         silentSeg = NSSegmentedControl(labels: [L("Silent", "静默"), L("Compatible", "兼容")],
@@ -999,7 +1040,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
 
         noSleepCheck = NSSwitch()
         noSleepCheck.state = .on
-        let noSleepRow = switchRow(noSleepCheck, L("Keep display awake while monitoring", "监控期间防止息屏"),
+        let noSleepRow = switchRow(noSleepCheck, L("Keep display awake", "监控期间防止息屏"),
                                    tip: L("Keeps the screen on via a power assertion while monitoring; released on stop", "监控运行时通过电源断言保持亮屏，停止后立即解除"),
                                    example: L("Overnight unattended retry runs — without it the display sleeps, screenshots fail, and retrying only resumes after wake. Manual power-off and lock screen (⌘⌃Q) are NOT covered: monitoring pauses until the screen returns.",
                                               "挂机通宵等重试——不开的话屏幕休眠后截图失败，要等亮屏才继续点。手动关屏、锁屏（⌘+控制+Q）不受保护：监控会暂停到屏幕恢复。"))
@@ -1051,7 +1092,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         idleSendCheck = NSSwitch()
         let idleSendTip = L("\"Idle\" = no error line, no \"Retry\" button, and no running task on screen", "「空闲」= 界面上既无错误行、无「重试」按钮、也无运行中任务")
         let idleSendRow = switchRow(idleSendCheck,
-                                    L("Idle auto-send: send the next command line", "空闲时自动发送下一行指令"),
+                                    L("Idle auto-send: next command line", "空闲时自动发送下一行指令"),
                                     tip: idleSendTip,
                                     example: L("Feeds a multi-line script to Codex one by one for long tasks; two sends are at least 5 minutes apart; your own draft in the input box is never overwritten. Won't fire while usage-limited (unless that pause switch is off).",
                                                "多行脚本指令逐条喂给 Codex 跑长任务；两次发送至少隔 5 分钟；绝不覆盖你手打的草稿。用量上限暂停期间不发送（除非关掉「用量上限时暂停」开关）。"))
@@ -1063,13 +1104,13 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         idleSendField.widthAnchor.constraint(equalToConstant: 44).isActive = true
         idleSendField.delegate = self
         idleSendField.toolTip = L("Minutes of idle before sending the next line (saved on focus loss)", "空闲持续多少分钟后发送下一行（失焦保存）")
-        let idleUnit = NSTextField(labelWithString: L("min before sending next line", "分钟后发送下一行"))
+        let idleUnit = NSTextField(labelWithString: L("min idle before next send", "分钟后发送下一行"))
         idleUnit.textColor = .secondaryLabelColor
         let idleMinutesRow = NSStackView(views: [formLabel(L("Idle", "空闲")), idleSendField, idleUnit])
         idleMinutesRow.orientation = .horizontal
         idleMinutesRow.spacing = 8
 
-        let scriptLabel = NSTextField(labelWithString: L("Commands (one per line, sent top-down, blank lines skipped):",
+        let scriptLabel = NSTextField(labelWithString: L("Commands (one per line, sent top-down):",
                                                            "指令内容（每行一条，依次发送，空行跳过）："))
         scriptLabel.font = .systemFont(ofSize: 11)
         scriptLabel.textColor = .secondaryLabelColor
@@ -1101,8 +1142,11 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         calibBtn.toolTip = L("Teach the app what the \"Retry\" button looks like (only needed after Codex UI updates)", "教应用认识「重试」按钮的样子（Codex 界面更新后才需要）")
         permBtn = symbolButton(L("Permissions", "授权"), symbol: "checkmark.shield", action: #selector(openPermTapped))
         permBtn.toolTip = L("Open permission guide / authorization settings", "打开权限引导 / 授权设置")
+        updateBtn = symbolButton(L("Updates", "检查更新"), symbol: "arrow.triangle.2.circlepath", action: #selector(checkUpdatesTapped))
+        updateBtn.toolTip = L("Manually check GitHub for a newer release. No background or automatic checks — runs only when you click.",
+                              "手动到 GitHub 检查是否有新版本。不做任何后台/自动检查，仅在你点击时联网一次。")
 
-        let btnRow = NSStackView(views: [startBtn, stopBtn, calibBtn, headerSpacer(), permBtn])
+        let btnRow = NSStackView(views: [startBtn, stopBtn, headerSpacer(), calibBtn, updateBtn, permBtn])
         btnRow.orientation = .horizontal
         btnRow.spacing = 10
         btnRow.alignment = .centerY
@@ -1177,10 +1221,10 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         return s
     }
 
-    /// 表单行左侧固定宽度标签
+    /// 表单行左侧固定宽度标签（同卡片内对齐；英文比中文宽，按语言给宽度）
     private func formLabel(_ text: String) -> NSTextField {
         let l = NSTextField(labelWithString: text)
-        l.widthAnchor.constraint(equalToConstant: 72).isActive = true
+        l.widthAnchor.constraint(equalToConstant: appLang == "zh" ? 72 : 92).isActive = true
         return l
     }
 
@@ -1296,14 +1340,17 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
     }
 
     /// 现代分组卡片：圆角系统底色 + SF Symbol 图标标题 + 内容列
-    private func card(icon: String, title: String, views: [NSView]) -> NSBox {
+    private func card(icon: String, title: String, views: [NSView], trailing: NSView? = nil) -> NSBox {
         let iconView = NSImageView()
         iconView.image = NSImage(systemSymbolName: icon, accessibilityDescription: title)
         iconView.contentTintColor = .secondaryLabelColor
         let head = NSTextField(labelWithString: title)
         head.font = .systemFont(ofSize: 12, weight: .semibold)
         head.textColor = .secondaryLabelColor
-        let headRow = NSStackView(views: [iconView, head])
+        var headViews: [NSView] = [iconView, head]
+        let hasTrailing = trailing != nil
+        if let trailing { headViews += [headerSpacer(), trailing] } // 卡片标题行右侧扩展位（如语言切换）
+        let headRow = NSStackView(views: headViews)
         headRow.orientation = .horizontal
         headRow.spacing = 6
 
@@ -1317,6 +1364,14 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         inner.alignment = .leading
         inner.spacing = 10
         inner.translatesAutoresizingMaskIntoConstraints = false
+        if hasTrailing {
+            // 标题行撑满卡片内容宽度，spacer 才能把 trailing 视图推到右端
+            headRow.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                headRow.leadingAnchor.constraint(equalTo: inner.leadingAnchor),
+                headRow.trailingAnchor.constraint(equalTo: inner.trailingAnchor),
+            ])
+        }
 
         let box = NSBox()
         box.boxType = .custom
@@ -1329,7 +1384,8 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         NSLayoutConstraint.activate([
             inner.topAnchor.constraint(equalTo: box.contentView!.topAnchor, constant: 12),
             inner.leadingAnchor.constraint(equalTo: box.contentView!.leadingAnchor, constant: 14),
-            inner.trailingAnchor.constraint(lessThanOrEqualTo: box.contentView!.trailingAnchor, constant: -14),
+            // 必须等宽：lessThanOrEqual 会让 inner 随内容收缩，带 trailing 视图时 spacer 撑不开、无法右对齐
+            inner.trailingAnchor.constraint(equalTo: box.contentView!.trailingAnchor, constant: -14),
             inner.bottomAnchor.constraint(equalTo: box.contentView!.bottomAnchor, constant: -12),
         ])
         return box
@@ -1401,19 +1457,48 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         }
     }
 
-    @objc func durationChanged() {        let isCustom = durationPopup.indexOfSelectedItem == 4
-        durUnitLabel.isHidden = !isCustom
-        if isCustom {
-            customField.isHidden = false
-            customField.isEnabled = true
-            customField.stringValue = String(customMinutes)
-            window.makeFirstResponder(customField)
+    /// 把 customMinutes 拆成小时/分钟刷进两个输入框
+    func syncCustomFieldsFromMinutes() {
+        customHourField.stringValue = String(customMinutes / 60)
+        customMinField.stringValue = String(customMinutes % 60)
+    }
+
+    /// 读取两个输入框并合并为总分钟数（非法值回退为当前 customMinutes）
+    func commitCustomFields() {
+        let h = Int(customHourField.stringValue.trimmingCharacters(in: .whitespaces)) ?? -1
+        let m = Int(customMinField.stringValue.trimmingCharacters(in: .whitespaces)) ?? -1
+        if h >= 0, h <= 720, m >= 0, m <= 59, h * 60 + m > 0 {
+            customMinutes = h * 60 + m
         } else {
-            let typed = Int(customField.stringValue.trimmingCharacters(in: .whitespaces))
-            if let t = typed, t > 0 { customMinutes = t }
-            customField.isEnabled = false
-            customField.isHidden = true
-            customField.stringValue = ""
+            syncCustomFieldsFromMinutes()
+        }
+    }
+
+    /// 时长的人读格式：<1 小时显示「N 分钟」，否则「N 小时 M 分」
+    func fmtDur(_ mins: Int) -> String {
+        mins >= 60 ? L("\(mins / 60) h \(mins % 60) min", "\(mins / 60) 小时 \(mins % 60) 分")
+                   : L("\(mins) min", "\(mins) 分钟")
+    }
+
+    @objc func durationChanged() {
+        let isCustom = durationPopup.indexOfSelectedItem == 4
+        durHourLabel.isHidden = !isCustom
+        durMinLabel.isHidden = !isCustom
+        if isCustom {
+            customHourField.isHidden = false
+            customHourField.isEnabled = true
+            customMinField.isHidden = false
+            customMinField.isEnabled = true
+            syncCustomFieldsFromMinutes()
+            window.makeFirstResponder(customHourField)
+        } else {
+            commitCustomFields() // 切走前保存已输入的值
+            customHourField.isEnabled = false
+            customHourField.isHidden = true
+            customHourField.stringValue = ""
+            customMinField.isEnabled = false
+            customMinField.isHidden = true
+            customMinField.stringValue = ""
         }
         saveConfig()
     }
@@ -1425,8 +1510,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         case 2: return 60 * 60
         case 3: return 120 * 60
         default:
-            let typed = Int(customField.stringValue.trimmingCharacters(in: .whitespaces))
-            if let t = typed, t > 0 { customMinutes = t }
+            commitCustomFields()
             return TimeInterval(max(1, customMinutes)) * 60
         }
     }
@@ -1454,10 +1538,11 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         stopBtn.isEnabled = true
         stopBtn.alphaValue = 1.0
         durationPopup.isEnabled = false
-        customField.isEnabled = false
+        customHourField.isEnabled = false
+        customMinField.isEnabled = false
         calibBtn.isEnabled = false
-        appendLog(L("▶️ Monitoring started | duration \(Int(selectedDuration() / 60)) min | \(silentSeg.selectedSegment == 0 ? "silent" : "compatible") clicks",
-                    "▶️ 开始监控｜时长 \(Int(selectedDuration() / 60)) 分钟｜\(silentSeg.selectedSegment == 0 ? "静默" : "兼容")点击"))
+        appendLog(L("▶️ Monitoring started | duration \(fmtDur(Int(selectedDuration() / 60))) | \(silentSeg.selectedSegment == 0 ? "silent" : "compatible") clicks",
+                    "▶️ 开始监控｜时长 \(fmtDur(Int(selectedDuration() / 60)))｜\(silentSeg.selectedSegment == 0 ? "静默" : "兼容")点击"))
         if idleSendCheck.state == .on {
             let n = scriptLines().count
             let m = Int(idleSendField.stringValue) ?? 10
@@ -1488,10 +1573,10 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
             self.stopBtn.isEnabled = false
             self.stopBtn.alphaValue = 0.45
             self.durationPopup.isEnabled = true
-            self.customField.isEnabled = self.durationPopup.indexOfSelectedItem == 4
-            if self.durationPopup.indexOfSelectedItem == 4 {
-                self.customField.stringValue = String(self.customMinutes)
-            }
+            let isCustom = self.durationPopup.indexOfSelectedItem == 4
+            self.customHourField.isEnabled = isCustom
+            self.customMinField.isEnabled = isCustom
+            if isCustom { self.syncCustomFieldsFromMinutes() }
             self.calibBtn.isEnabled = true
             self.statusChip.set(color: .systemGray, dot: "○",
                                 text: L("Stopped · \(self.clicksValue()) clicks this session", "已停止 · 本次点击 \(self.clicksValue()) 次"))
@@ -1566,13 +1651,8 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
                 appendLog(L("⚠️ Check interval must be a number between 1–3600; restored to \(Int(currentInterval))",
                             "⚠️ 检查间隔需为 1–3600 的数字，已恢复为 \(Int(currentInterval))"))
             }
-        } else if field === customField {
-            let t = Int(field.stringValue.trimmingCharacters(in: .whitespaces)) ?? 0
-            if t > 0, t <= 24 * 60 {
-                customMinutes = t
-            } else {
-                field.stringValue = String(customMinutes)
-            }
+        } else if field === customHourField || field === customMinField {
+            commitCustomFields() // 非法输入在 commit 内回退为当前值
         } else if field === idleSendField {
             let t = Int(field.stringValue.trimmingCharacters(in: .whitespaces)) ?? 0
             if t >= 1, t <= 24 * 60 {
@@ -1590,10 +1670,10 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         statusTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             guard let self, self.running else { return }
             let left = max(0, Int(self.deadline.timeIntervalSinceNow))
-            let m = left / 60, s = left % 60
+            let h = left / 3600, m = (left % 3600) / 60, s = left % 60
             self.statusChip.set(color: .systemGreen, dot: "●",
-                                text: String(format: L("Running · %02d:%02d left · %d clicks",
-                                                        "运行中 · 剩余 %02d:%02d · 已点击 %d 次"), m, s, self.clicksValue()))
+                                text: String(format: L("Running · %d:%02d:%02d left · %d clicks",
+                                                        "运行中 · 剩余 %d:%02d:%02d · 已点击 %d 次"), h, m, s, self.clicksValue()))
             tick += 1
             if tick % 16 == 0 { self.refreshPermLabel() } // 每 8 秒刷新一次权限状态
         }
@@ -2267,6 +2347,100 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
     }
 
     // MARK: 空闲自动发送（原生 AX 后台输入，见全局 nativeSendLine）
+
+    // MARK: 界面语言切换（AUTO/中文/EN）
+
+    @objc func langChanged() {
+        let pref: String? = langSeg.selectedSegment == 1 ? "zh" : (langSeg.selectedSegment == 2 ? "en" : nil)
+        guard pref != explicitLangPref else { return }
+        explicitLangPref = pref
+        saveConfig()
+        // 同步 AppleLanguages 偏好：重启后 Dock/Finder 里的 App 名称（InfoPlist.strings）也跟着切换；
+        // AUTO 则移除该偏好，恢复跟随系统语言
+        if let pref {
+            UserDefaults.standard.set([pref == "zh" ? "zh-Hans" : "en"], forKey: "AppleLanguages")
+        } else {
+            UserDefaults.standard.removeObject(forKey: "AppleLanguages")
+        }
+        let name = pref == "zh" ? "中文" : (pref == "en" ? "English" : L("System", "跟随系统"))
+        let alert = NSAlert()
+        alert.messageText = L("Language set to \(name)", "语言已切换为\(name)")
+        alert.informativeText = L("Restart the app now to apply the new language?",
+                                  "要立即重启应用使新语言生效吗？")
+        alert.addButton(withTitle: L("Restart Now", "立即重启"))
+        alert.addButton(withTitle: L("Later", "稍后"))
+        if alert.runModal() == .alertFirstButtonReturn {
+            // 不能用 NSWorkspace.openApplication：同 bundle id 已有实例在跑时它只会激活旧实例，
+            // 随后 terminate 把唯一的实例杀掉 → 新实例永远起不来（「已不能再打开」报错）。
+            // 改为起一个独立的延迟进程，等当前进程退出后再 open -n 拉起新实例。
+            let path = Bundle.main.bundleURL.path
+            if let task = try? Process.run(URL(fileURLWithPath: "/bin/sh"),
+                                           arguments: ["-c", "sleep 0.8; open -n '\(path)'"]) {
+                task.terminationHandler = nil
+            }
+            NSApp.terminate(nil)
+        } else {
+            appendLog(L("🌐 Language set to \(name); takes effect on next launch", "🌐 语言已设为\(name)，下次启动生效"))
+        }
+    }
+
+    // MARK: 检查更新（仅手动触发，无任何后台/自动检查）
+
+    /// 拉取 GitHub latest release 的版本号（后台线程调用，同步阻塞可接受）。
+    /// 返回 nil = 网络失败/被限流/响应异常。
+    static func fetchLatestReleaseTag() -> String? {
+        guard let url = URL(string: "https://api.github.com/repos/yuxi1989/Codex-RetryPilot/releases/latest") else { return nil }
+        var req = URLRequest(url: url, timeoutInterval: 8)
+        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        let sema = DispatchSemaphore(value: 0)
+        var data: Data?
+        let task = URLSession.shared.dataTask(with: req) { d, _, _ in data = d; sema.signal() }
+        task.resume()
+        sema.wait() // 后台线程同步等待，超时 8 秒
+        guard let data, let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tag = obj["tag_name"] as? String, !tag.isEmpty else { return nil }
+        return tag
+    }
+
+    /// 语义化版本比较：逐段比数字，缺段按 0（"v" 前缀可有可无）
+    static func isNewer(_ candidate: String, than current: String) -> Bool {
+        func parts(_ s: String) -> [Int] {
+            s.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
+                .split(separator: ".").map { Int($0) ?? 0 }
+        }
+        let a = parts(candidate), b = parts(current)
+        for i in 0..<max(a.count, b.count) {
+            let x = i < a.count ? a[i] : 0, y = i < b.count ? b[i] : 0
+            if x != y { return x > y }
+        }
+        return false
+    }
+
+    @objc func checkUpdatesTapped() {
+        updateBtn.isEnabled = false
+        appendLog(L("🔎 Checking for updates…", "🔎 正在检查更新…"))
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let tag = Self.fetchLatestReleaseTag()
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.updateBtn.isEnabled = true
+                guard let tag else {
+                    self.appendLog(L("⚠️ Update check failed (network unreachable or API rate-limited); current version v\(appVersion)",
+                                "⚠️ 检查更新失败（网络不可达或被 GitHub 限流），当前版本 v\(appVersion)"))
+                    return
+                }
+                if Self.isNewer(tag, than: appVersion) {
+                    self.appendLog(L("🆕 New version \(tag) available (current v\(appVersion)); opening the releases page",
+                                "🆕 发现新版本 \(tag)（当前 v\(appVersion)），已打开下载页"))
+                    if let url = URL(string: "https://github.com/yuxi1989/Codex-RetryPilot/releases/latest") {
+                        NSWorkspace.shared.open(url)
+                    }
+                } else {
+                    self.appendLog(L("✅ You're on the latest version (v\(appVersion))", "✅ 已是最新版本（v\(appVersion)）"))
+                }
+            }
+        }
+    }
 
     @objc func openPermTapped() {
         // 手动点击时才把自动化纳入引导（自动化只在坐标点击兜底后归还焦点时用到）
