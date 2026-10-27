@@ -111,7 +111,7 @@ let LIMIT_KEYWORDS = ["使用上限", "额度已用完", "usage limit", "codex a
 
 /// 应用版本（单一来源，必须与项目版本一致 = README「版本历史」/ git tag）：发版时只改这里，
 /// release.sh 会同步写进 Info.plist，「关于」面板也显示它
-let appVersion = "1.0.4"
+let appVersion = "1.0.5"
 
 /// 项目主页（「关于」面板展示）
 let projectHomepage = URL(string: "https://github.com/yuxi1989/Codex-RetryPilot")!
@@ -378,10 +378,33 @@ func fmtMDHM(_ d: Date) -> String {
 
 /// 强制开启 Codex(Electron/Chromium) 渲染进程的无障碍支持。
 /// 没有它时渲染层可能未启用 a11y，AXPress 会「假成功」（返回成功但不执行点击）。
+/// AXManualAccessibility / AXEnhancedUserInterface 是跨进程写，会让 Chromium 重建 AX 树，
+/// 每轮都写会在用户打字时造成卡顿：节流到 60 秒一次（Codex 重启后最多 60 秒恢复扫描）。
+var lastRendererAXSetAt: Date = .distantPast
 func enableRendererAccessibility(_ app: NSRunningApplication) {
+    if Date().timeIntervalSince(lastRendererAXSetAt) < 60 { return }
+    lastRendererAXSetAt = Date()
     let el = AXUIElementCreateApplication(app.processIdentifier)
     AXUIElementSetAttributeValue(el, "AXManualAccessibility" as CFString, kCFBooleanTrue)
     AXUIElementSetAttributeValue(el, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+}
+
+/// 用户是否正在活跃操作（打字 / 按鼠标 / 滚轮）。
+/// 合成点击、AXPress、Return 注入都可能让输入框失焦、打断输入法组词，
+/// 滚动按压还会把正往上翻历史的视图拽回底部——一切「动手」类操作前先过这道闸：
+/// 用户活跃就本轮跳过，下个周期再动手（错误行不会自己消失，晚一轮点击无代价）。
+/// anyAppKeySec > 0 时额外做不限前台的全局键盘检查：用户在任何 app 里打字都算活跃——
+/// AXPress 偶发抢焦点（Chromium 行为），焦点归还的瞬间弹走弹回也会打断其他 app 的输入法组词。
+func userActiveInCodex(_ app: NSRunningApplication,
+                       keySec: Double = 5, mouseSec: Double = 3, scrollSec: Double = 0,
+                       anyAppKeySec: Double = 0) -> Bool {
+    let src = CGEventSourceStateID.combinedSessionState
+    if anyAppKeySec > 0, CGEventSource.secondsSinceLastEventType(src, eventType: .keyDown) < anyAppKeySec { return true }
+    guard NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier else { return false }
+    if keySec > 0, CGEventSource.secondsSinceLastEventType(src, eventType: .keyDown) < keySec { return true }
+    if mouseSec > 0, CGEventSource.secondsSinceLastEventType(src, eventType: .leftMouseDown) < mouseSec { return true }
+    if scrollSec > 0, CGEventSource.secondsSinceLastEventType(src, eventType: .scrollWheel) < scrollSec { return true }
+    return false
 }
 
 /// 全局点击（会占用光标），点完立刻把光标挪回原位
@@ -1712,6 +1735,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         var stableHintAt = Date.distantPast       // 「残留错误视为空闲」提示的节流
         var scrollHintAt = Date.distantPast       // 「滚动到底」提示的节流
         var lastScrollPressAt = Date.distantPast  // 滚动按压节流：用户可能正往上翻历史，不要太频繁拽回底部
+        var userActiveHintAt = Date.distantPast   // 「用户输入中，本轮跳过点击」提示的节流
         var idleSince: Double? = nil   // 单调时钟打点（秒），见 nowTick()
         var idleBaseline: String? = nil // 空闲期开始时的输入框内容；期间没变化才允许覆盖发送（Codex 会往输入框塞建议文案，AXValue 非空但不是用户输入）
         var idleSendIdx = 0
@@ -1737,7 +1761,8 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
             var scan = scanCodex()
             // 视图未滚到底（出现「滚动到底部」下箭头）时，窗口外的错误行/按钮读不全，
             // 直接判定会漏判「重试」按钮、也可能误判空闲。先滚到底、稍等渲染、重扫一次再用新数据判定。
-            if scan.scrollBtn != nil, Date().timeIntervalSince(lastScrollPressAt) > 5 {
+            if scan.scrollBtn != nil, Date().timeIntervalSince(lastScrollPressAt) > 5,
+               !userActiveInCodex(codex, scrollSec: 3) {
                 lastScrollPressAt = Date()
                 if AXUIElementPerformAction(scan.scrollBtn!, kAXPressAction as CFString) == .success {
                     if Date().timeIntervalSince(scrollHintAt) > 120 {
@@ -1838,7 +1863,8 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
                     } else if baselineChanged {
                         // 基线这轮刚更新：内容是新的，本轮绝不发送（重新计满 N 分钟后再看）
                     } else if idleSec >= idleMin * 60, idleSendIdx < lines.count,
-                              postSendHoldUntil == nil || now >= postSendHoldUntil! {
+                              postSendHoldUntil == nil || now >= postSendHoldUntil!,
+                              !userActiveInCodex(codex) {
                         let line = lines[idleSendIdx]
                         appendLog(L("💬 Codex idle for \(Int(idleSec / 60)) min, sending line \(idleSendIdx + 1)/\(lines.count)…",
                                     "💬 Codex 已空闲 \(Int(idleSec / 60)) 分钟，发送第 \(idleSendIdx + 1)/\(lines.count) 行…"))
@@ -1962,6 +1988,18 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
                 continue
             }
             // 坐标点击会抢焦点，所以先记下当前前台应用，点完还回去（恒开，无开关）
+            // 用户正在打字/点击：任何合成点击都可能让输入框失焦、打断输入法组词。
+            // anyAppKeySec=3：不限前台——你在其他 app 打字时 AXPress 偶发抢焦点再归还，
+            // 弹走弹回的瞬间同样打断组词，所以任何 app 有打字动作都跳过本轮。
+            if userActiveInCodex(codex, anyAppKeySec: 3) {
+                if Date().timeIntervalSince(userActiveHintAt) > 120 {
+                    userActiveHintAt = Date()
+                    appendLog(L("ℹ️ You're typing/clicking; skipping automated actions this cycle to protect input focus",
+                                "ℹ️ 检测到你正在输入/操作，本轮暂停自动点击，避免打断输入法"))
+                }
+                sleepSec(interval)
+                continue
+            }
             let previousApp = NSWorkspace.shared.frontmostApplication
             var handled = false
             var backgroundTried = false   // 本轮是否已投递过后台点击（避免同一轮重复投递）
