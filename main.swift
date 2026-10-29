@@ -106,12 +106,18 @@ let SCROLL_BOTTOM_TITLES = ["滚动到底部", "Scroll to bottom", "滾動到底
 /// 错误行关键字（小写匹配；可在 config.json 的 "errorKeywords" 里覆盖）
 var errorKeywords = ["at capacity"]
 /// 「用量上限」关键字（小写匹配）：命中说明套餐额度用完、点重试无效，只能等额度重置。
-/// 此状态暂停点击与空闲发送，也不算空闲（和 at capacity 的瞬时错误分开处理）
+/// 此状态暂停点击与空闲发送，也不算空闲（和 at capacity 的瞬时错误分开处理）。
+/// 注意：这些词也会出现在对话正文里（例如图片生成额度提示「您已达到使用上限」），
+/// 单凭关键字判定会误判 —— 真正的判定见 STRONG_LIMIT_KEYWORDS + 主循环里的强弱两档逻辑。
 let LIMIT_KEYWORDS = ["使用上限", "额度已用完", "usage limit", "codex and work usage", "rate limit resets"]
+/// 「官方额度横幅」专属措辞（小写匹配）：只会出现在 Codex 自己的额度提示条上，对话正文里不会有。
+/// 命中即为强信号，直接判定用量上限；其余含「使用上限」字样的文字只算弱信号，需多轮确认。
+let STRONG_LIMIT_KEYWORDS = ["codex and work usage", "rate limit resets", "usage limit resets",
+                             "额度将在", "上限将在", "额度重置时间"]
 
 /// 应用版本（单一来源，必须与项目版本一致 = README「版本历史」/ git tag）：发版时只改这里，
 /// release.sh 会同步写进 Info.plist，「关于」面板也显示它
-let appVersion = "1.0.5"
+let appVersion = "1.0.6"
 
 /// 项目主页（「关于」面板展示）
 let projectHomepage = URL(string: "https://github.com/yuxi1989/Codex-RetryPilot")!
@@ -158,7 +164,8 @@ struct ErrorRow { let rect: CGRect }
 
 struct CodexScan {
     var rows: [ErrorRow] = []
-    var limitTexts: [String] = [] // 「用量上限」命中的原文（解析额度重置时间用）
+    var limitTexts: [String] = [] // 可见的「用量上限」文案原文（解析额度重置时间用）
+    var strongLimit = false       // 命中官方横幅专属措辞 = 强信号（对话正文里不会出现）
     var buttons: [(el: AXUIElement, rect: CGRect)] = []
     var busy = false // 界面上存在「停止」类按钮 = Codex 正在运行任务
     var scrollBtn: AXUIElement? // 「滚动到底部」下箭头：出现即代表视图不在底部，读到的界面不全
@@ -179,7 +186,12 @@ func scanCodex() -> CodexScan {
                 s.rows.append(ErrorRow(rect: r))
             }
             if LIMIT_KEYWORDS.contains(where: { txt.contains($0) }) {
-                s.limitTexts.append(raw)
+                // 只认「可见」文案：虚拟化列表里滚出屏幕的历史行 rect 高度为 1，
+                // 会把几条对话里出现过的「使用上限」永远算成当前状态（实际误判来源）。
+                if let r = axRect(el), r.height >= 8, r.width >= 40 {
+                    s.limitTexts.append(raw)
+                    if STRONG_LIMIT_KEYWORDS.contains(where: { txt.contains($0) }) { s.strongLimit = true }
+                }
             }
         } else if role == "AXButton", let r = axRect(el), r.height > 8 {
             let t = axStr(el, kAXTitleAttribute)
@@ -217,32 +229,10 @@ func displaysUnion() -> CGRect {
 
 // MARK: - 截图 / 比对 / 点击
 
-/// 进程内截图（坐标与 AX 一致，顶部左侧原点）。
-/// 主路：ScreenCaptureKit（macOS 14+，无子进程、无临时文件）；
-/// 兜底：screencapture 子进程（旧系统）。
-func captureRegion(_ rect: CGRect) -> CGImage? {
-    if #available(macOS 14.0, *) {
-        let sema = DispatchSemaphore(value: 0)
-        var out: CGImage?
-        Task {
-            defer { sema.signal() }
-            do {
-                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-                guard let display = content.displays.first(where: { $0.frame.intersects(rect) }) ?? content.displays.first else { return }
-                let filter = SCContentFilter(display: display, excludingWindows: [])
-                let cfg = SCStreamConfiguration()
-                cfg.sourceRect = rect
-                cfg.width = Int(rect.width) * 2   // 2x，与旧 screencapture 在 Retina 下的输出一致
-                cfg.height = Int(rect.height) * 2
-                cfg.showsCursor = false
-                cfg.captureResolution = .best
-                out = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: cfg)
-            } catch { }
-        }
-        sema.wait()
-        return out
-    }
-    // 旧系统回退：子进程截图
+/// screencapture 子进程截图（旧系统主路，也是 SCK 失败时的兜底）。
+/// 子进程继承本 app 的屏幕录制授权，两者失败/成功通常同步，但 SCK 有独立故障面
+/// （例如 API 变更、显示器状态、内部超时），故保留双路。
+func captureViaProcess(_ rect: CGRect) -> CGImage? {
     let path = NSTemporaryDirectory() + "codexretry_cand.png"
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
@@ -254,6 +244,68 @@ func captureRegion(_ rect: CGRect) -> CGImage? {
           let src = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
           let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return nil }
     return img
+}
+
+/// 截图（带失败原因）：先 SCK，失败自动退到 screencapture 子进程，并把原因带出去写日志。
+/// 返回 nil 时 error 一定有值，方便日志说清「为什么截图失败」（以前 catch 静默吞掉，只能猜）。
+func captureRegionDetailed(_ rect: CGRect) -> (image: CGImage?, error: String?) {
+    if #available(macOS 14.0, *) {
+        let sema = DispatchSemaphore(value: 0)
+        var out: CGImage?
+        var err: String?
+        Task {
+            defer { sema.signal() }
+            do {
+                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                // 选「覆盖面积最大」的显示器：窗口跨屏时不能随便取第一个相交的
+                let display = content.displays
+                    .map { ($0, $0.frame.intersection(rect)) }
+                    .filter { !$0.1.isNull && !$0.1.isEmpty }
+                    .max(by: { $0.1.width * $0.1.height < $1.1.width * $1.1.height })?.0
+                    ?? content.displays.first
+                guard let display else {
+                    err = "SCK: no display (displays=\(content.displays.count))"
+                    return
+                }
+                // ⚠️ sourceRect 用的是「以该显示器左上角为原点」的局部坐标，必须减掉显示器原点。
+                // 主显示器原点恰好是 (0,0)，全局坐标 == 局部坐标，所以单屏/主屏上一直正常；
+                // 一旦 Codex 窗口被拖到副屏，传全局坐标就会越界 → SCStreamErrorDomain -3812
+                // 「参数无效导致失败」→ 截图失败（2026-10-29 的故障就是它）。
+                let local = rect.offsetBy(dx: -display.frame.minX, dy: -display.frame.minY)
+                // 贴边时区域可能超出一半，裁进显示器范围再截
+                let clamped = local.intersection(CGRect(origin: .zero, size: display.frame.size))
+                guard !clamped.isEmpty, clamped.width >= 2, clamped.height >= 2 else {
+                    err = "SCK: region outside display \(display.displayID) (local=\(local))"
+                    return
+                }
+                let filter = SCContentFilter(display: display, excludingWindows: [])
+                let cfg = SCStreamConfiguration()
+                cfg.sourceRect = clamped
+                cfg.width = Int(clamped.width) * 2   // 2x，与旧 screencapture 在 Retina 下的输出一致
+                cfg.height = Int(clamped.height) * 2
+                cfg.showsCursor = false
+                cfg.captureResolution = .best
+                out = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: cfg)
+                if out == nil { err = "SCK: nil image" }
+            } catch {
+                let e = error as NSError
+                err = "SCK: \(e.domain) \(e.code) \(e.localizedDescription)"
+            }
+        }
+        // 3 秒没回来就别再等（SCK 偶发不回调，旧代码会永久卡住这一轮）
+        if sema.wait(timeout: .now() + 3) == .timedOut { err = "SCK: timeout 3s" }
+        if let img = out { return (img, nil) }
+        if let fb = captureViaProcess(rect) { return (fb, "\(err ?? "SCK: ?") → screencapture fallback OK") }
+        return (nil, "\(err ?? "SCK: ?") → screencapture fallback also failed")
+    }
+    // 旧系统：子进程截图
+    let img = captureViaProcess(rect)
+    return (img, img == nil ? "screencapture failed" : nil)
+}
+
+/// 进程内截图（坐标与 AX 一致，顶部左侧原点）：主路 ScreenCaptureKit（macOS 14+），失败退子进程。
+func captureRegion(_ rect: CGRect) -> CGImage? {
+    captureRegionDetailed(rect).image
 }
 
 func loadImage(_ url: URL) -> CGImage? {
@@ -684,6 +736,38 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         buildUI()
         loadConfig()
         appendLog(L("Ready. Target app: Codex (com.openai.codex)", "就绪。目标应用：Codex（com.openai.codex）"))
+        // 截图自检（调试用，不影响正常启动）：环境变量 CR_CAPTURE_SELFTEST=1
+        // 或存在 sentinel 文件 selftest.flag 时，连拍 3 次写日志后退出，
+        // 用来判断「截图失败」是权限、SCK 还是兜底链路的问题。
+        if ProcessInfo.processInfo.environment["CR_CAPTURE_SELFTEST"] == "1"
+            || FileManager.default.fileExists(atPath: appSupportDir.appendingPathComponent("selftest.flag").path) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                guard let self else { exit(0) }
+                var regions: [(String, CGRect)] = [("主屏左上 (0,0)", CGRect(x: 0, y: 0, width: 80, height: 30))]
+                // Codex 窗口内取一块：副屏/跨屏场景也能覆盖到（2026-10-29 的 -3812 就出在这）
+                if let codex = codexApp() {
+                    let ax = AXUIElementCreateApplication(codex.processIdentifier)
+                    if let wins = axAttr(ax, kAXWindowsAttribute) as? [AXUIElement],
+                       let w = wins.compactMap({ axRect($0) }).max(by: { $0.width * $0.height < $1.width * $1.height }) {
+                        regions.append(("Codex 窗口 \(Int(w.minX)),\(Int(w.minY))", CGRect(x: w.minX + 60, y: w.minY + 60, width: 80, height: 30)))
+                        regions.append(("Codex 窗口右下", CGRect(x: w.maxX - 140, y: w.maxY - 45, width: 80, height: 30)))
+                    }
+                }
+                for (label, region) in regions {
+                    let r = captureRegionDetailed(region)
+                    let line: String
+                    if let img = r.image {
+                        line = "🧪 自检 \(label)：截图 OK \(img.width)x\(img.height)" + (r.error.map { "（\($0)）" } ?? "")
+                    } else {
+                        line = "🧪 自检 \(label)：截图失败 \(r.error ?? "未知")"
+                    }
+                    self.appendLog(line)
+                    print(line)
+                }
+                exit(0)
+            }
+            return
+        }
         // 启动后等 TCC 就绪再做判定：先记一条不带结论的状态，2 秒后复核，只有复核仍缺才引导
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
             guard let self else { return }
@@ -1724,6 +1808,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         var noFieldHintAt: Double = 0
         var exhaustedLogged = false
         var captureFails = 0
+        var captureFallbackHintAt = Date.distantPast // 「已改用 screencapture 兜底」提示的节流
             var preferCoordinateClick = false
             var downgradedAt: Date? = nil
             var lastRendererAXAt = Date.distantPast   // AXManualAccessibility 是跨进程写，不必每轮都设
@@ -1745,6 +1830,8 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         var limitStableSince: Date? = nil    // 上限文本稳定计时：解析不出重置时间且稳定 10 分钟 → 视为残留历史文案
         var limitWasActive = false           // 上一轮是否处于上限状态：「已解除」日志只打一次
         var limitHintAt = Date.distantPast   // 上限提示节流
+        var limitWeakStreak = 0              // 弱信号（仅「使用上限」字样）连续命中的轮数：≥2 才判定
+        var limitIgnoreHintAt = Date.distantPast // 「命中上限字样但不算限额」提示的节流
 
         while running && Date() < deadline {
             let interval = currentInterval // 每轮实时读取，失焦修改立即生效
@@ -1796,8 +1883,11 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
             let isIdle = rows.isEmpty && scan.buttons.isEmpty && !scan.busy
             if !isIdle && !residualIdle { idleSince = nil; idleBaseline = nil }
             // ── 用量上限（套餐额度用完）：点重试无效，暂停点击与空闲发送，等额度重置 ──
-            // 界面上有「重试」按钮时不算（那说明当前是 at capacity 瞬时错误，照常处理）；
-            // 解析出重置时间则等到重置为止，解析不出则最多等 10 分钟（之后按残留文案处理，避免卡死）。
+            // 判据分强弱两档，避免把对话正文里的「您已达到使用上限」当成真限额而让监控停摆：
+            //   强信号 = 官方横幅专属措辞（STRONG_LIMIT_KEYWORDS，含重置时间那句话）→ 立即判定；
+            //   弱信号 = 只出现「使用上限 / usage limit」字样 → 必须同时满足：无「重试」按钮、
+            //            屏幕上没有可见的 at capacity 错误行、连续 2 轮（约 20s）都在。
+            // 解析出重置时间就等到重置；解析不出最多等 10 分钟（之后按残留文案处理，避免卡死）。
             // 开关关闭时整段跳过，恢复旧行为（可能误判空闲、白发指令）。
             if scan.limitTexts.count != limitRowsCount {
                 limitRowsCount = scan.limitTexts.count
@@ -1811,14 +1901,34 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
                 if let future = parsed.filter({ $0 > Date() }).max() { return future }
                 return parsed.last
             }()
-            let limitActive = limitPause && !scan.limitTexts.isEmpty && scan.buttons.isEmpty
-                && (limitReset.map { Date() < $0 } ?? !limitStable)
+            let limitFuture = limitReset.map { Date() < $0 } ?? false
+            // 弱信号的前提：没重试按钮、屏幕上看不到 at capacity 错误行（两者同时出现 = 模型瞬时容量问题）
+            let limitWeakCandidate = !scan.limitTexts.isEmpty && scan.buttons.isEmpty && rows.isEmpty
+            if limitWeakCandidate { limitWeakStreak += 1 } else { limitWeakStreak = 0 }
+            let limitActive = limitPause && scan.buttons.isEmpty && (
+                scan.strongLimit
+                || (limitWeakStreak >= 2 && (limitFuture || !limitStable))
+            )
+            // 命中了上限字样却没判定为限额：说清原因，免得日志看起来像「上限被忽略」
+            if limitPause, !scan.limitTexts.isEmpty, !limitActive, !limitWasActive,
+               Date().timeIntervalSince(limitIgnoreHintAt) > 300 {
+                limitIgnoreHintAt = Date()
+                let why: String
+                if !scan.buttons.isEmpty { why = L("a \"Retry\" button is present → transient model capacity error",
+                                                   "界面上有「重试」按钮 → 按 at capacity 瞬时错误处理") }
+                else if !rows.isEmpty { why = L("an at-capacity error line is visible → transient model capacity error",
+                                                "屏幕上有 at capacity 错误行 → 按瞬时错误处理") }
+                else { why = L("not confirmed in 2 consecutive scans yet", "尚未连续 2 轮确认") }
+                appendLog(L("ℹ️ Found text containing \"usage limit\" but \(why); not pausing",
+                            "ℹ️ 检测到含「使用上限」的字样，但\(why)，不按额度耗尽处理"))
+            }
             if limitActive {
                 if !limitWasActive {
                     limitWasActive = true
                     let until = limitReset.map { "，预计 " + fmtMDHM($0) + " 重置" } ?? ""
+                    let weakTag = scan.strongLimit ? "" : "（连续 2 轮确认）"
                     appendLog(L("⏸ Usage limit reached; retry clicks and idle auto-send paused until the quota resets\(until). Won't press \"Reset usage\" — that one-time reset is yours to spend",
-                                "⏸ 用量已达上限，暂停重试与空闲发送，等额度重置\(until)后自动恢复。不会代点「重置使用量」（一次性机会留给你）"))
+                                "⏸ 用量已达上限\(weakTag)，暂停重试与空闲发送，等额度重置\(until)后自动恢复。不会代点「重置使用量」（一次性机会留给你）"))
                 } else if Date().timeIntervalSince(limitHintAt) > 600 {
                     appendLog(L("⏸ Still usage-limited; waiting for quota reset", "⏸ 仍处于用量上限状态，继续等待额度重置"))
                 }
@@ -1830,6 +1940,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
             }
             if limitWasActive {
                 limitWasActive = false
+                limitWeakStreak = 0
                 appendLog(L("✅ Usage limit cleared; resuming normal monitoring", "✅ 额度上限已解除，恢复正常监控"))
             }
             guard let last = rows.map({ $0.rect }).max(by: { $0.minY < $1.minY }), !residualIdle else {
@@ -1926,11 +2037,19 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
                 continue
             }
             let region = CGRect(x: pt.x - 40, y: pt.y - 15, width: 80, height: 30)
-            guard let cand = captureRegion(region) else {
+            let cap = captureRegionDetailed(region)
+            // SCK 失败但子进程兜底成功：不打「截图失败」，只提示一次换路成功
+            if cap.image != nil, let why = cap.error, Date().timeIntervalSince(captureFallbackHintAt) > 600 {
+                captureFallbackHintAt = Date()
+                appendLog(L("ℹ️ Screenshot switched to the screencapture helper (\(why))",
+                            "ℹ️ 截图已改用 screencapture 兜底（\(why)）"))
+            }
+            guard let cand = cap.image else {
                 captureFails += 1
                 if captureFails <= 2 || captureFails % 6 == 0 {
-                    appendLog(L("Screenshot failed (display may be asleep/locked), pausing…",
-                                "截图失败（屏幕可能已休眠/锁定），暂停观察中…"))
+                    let why = cap.error ?? L("unknown", "未知原因")
+                    appendLog(L("Screenshot failed (\(why)); pausing…",
+                                "截图失败（\(why)），暂停观察中…"))
                 }
                 sleepSec(15)
                 continue
@@ -2504,8 +2623,9 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         }
         let pt = targetPoint(for: last)
         let region = CGRect(x: pt.x - 40, y: pt.y - 15, width: 80, height: 30)
-        guard let cand = captureRegion(region) else {
-            appendLog("校准失败：截图失败")
+        let cap = captureRegionDetailed(region)
+        guard let cand = cap.image else {
+            appendLog("校准失败：截图失败（\(cap.error ?? "未知原因")）")
             return
         }
         let rep = NSBitmapImageRep(cgImage: cand)
