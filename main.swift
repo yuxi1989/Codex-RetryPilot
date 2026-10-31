@@ -103,6 +103,13 @@ let RETRY_TITLES = ["重试", "Retry", "重試"]
 let BUSY_TITLES = ["停止", "Stop", "中止", "Interrupt"]
 /// 「滚动到底部」下箭头按钮标题：视图未在底部时出现，此时窗口外的错误行/按钮读不全，须先滚到底再判定
 let SCROLL_BOTTOM_TITLES = ["滚动到底部", "Scroll to bottom", "滾動到底部"]
+/// 「重置使用量」按钮：只出现在官方额度横幅上 —— 既证明额度耗尽，也用来定位横幅文案
+let RESET_USAGE_TITLES = ["重置使用量", "Reset usage", "Reset usage limit", "重設使用量"]
+/// 「恢复目标」按钮：额度耗尽时 Codex 会把当前 Goal 置为「目标使用受限」，
+/// 额度恢复后点它就能从原目标继续（比发「继续」更准，不会改变会话意图）
+let RESUME_GOAL_TITLES = ["恢复目标", "Resume goal", "Resume Goal", "恢復目標"]
+/// 「目标使用受限」状态条的文案前缀（AXButton 标题形如「目标使用受限 按开发文档持续进行开发 49m 18s」）
+let GOAL_LIMITED_KEYWORDS = ["目标使用受限", "目标已暂停", "goal paused", "goal is paused", "goal paused by usage limit"]
 /// 错误行关键字（小写匹配；可在 config.json 的 "errorKeywords" 里覆盖）
 var errorKeywords = ["at capacity"]
 /// 「用量上限」关键字（小写匹配）：命中说明套餐额度用完、点重试无效，只能等额度重置。
@@ -112,12 +119,14 @@ var errorKeywords = ["at capacity"]
 let LIMIT_KEYWORDS = ["使用上限", "额度已用完", "usage limit", "codex and work usage", "rate limit resets"]
 /// 「官方额度横幅」专属措辞（小写匹配）：只会出现在 Codex 自己的额度提示条上，对话正文里不会有。
 /// 命中即为强信号，直接判定用量上限；其余含「使用上限」字样的文字只算弱信号，需多轮确认。
+/// 中文实测文案：「Codex 和工作使用额度已用完」「你的速率限制将于 22:59 重置。立即升级，或使用一次速率限制重置机会。」
 let STRONG_LIMIT_KEYWORDS = ["codex and work usage", "rate limit resets", "usage limit resets",
-                             "额度将在", "上限将在", "额度重置时间"]
+                             "额度将在", "上限将在", "额度重置时间",
+                             "和工作使用额度已用完", "速率限制将于", "速率限制重置"]
 
 /// 应用版本（单一来源，必须与项目版本一致 = README「版本历史」/ git tag）：发版时只改这里，
 /// release.sh 会同步写进 Info.plist，「关于」面板也显示它
-let appVersion = "1.0.6"
+let appVersion = "1.0.7"
 
 /// 项目主页（「关于」面板展示）
 let projectHomepage = URL(string: "https://github.com/yuxi1989/Codex-RetryPilot")!
@@ -164,11 +173,34 @@ struct ErrorRow { let rect: CGRect }
 
 struct CodexScan {
     var rows: [ErrorRow] = []
-    var limitTexts: [String] = [] // 可见的「用量上限」文案原文（解析额度重置时间用）
+    /// 命中「用量上限」字样的可见文本（含坐标：用来区分官方横幅与对话正文里的历史文案）
+    var limitItems: [(text: String, rect: CGRect)] = []
+    /// 全部可见静态文本（含坐标）：横幅上的重置时间那句不含「使用上限」字样，
+    /// 只能靠「与『重置使用量』按钮同高」这个几何关系捞出来，所以这里全量留一份
+    var allTexts: [(text: String, rect: CGRect)] = []
+    /// 「重置使用量 / Reset usage」按钮的位置 = 官方额度横幅存在（这个按钮只出现在额度横幅上）
+    var limitAnchorRects: [CGRect] = []
     var strongLimit = false       // 命中官方横幅专属措辞 = 强信号（对话正文里不会出现）
     var buttons: [(el: AXUIElement, rect: CGRect)] = []
     var busy = false // 界面上存在「停止」类按钮 = Codex 正在运行任务
     var scrollBtn: AXUIElement? // 「滚动到底部」下箭头：出现即代表视图不在底部，读到的界面不全
+    /// 「恢复目标」按钮：额度恢复后点它，被中断的目标会话从原目标继续
+    var resumeGoal: (el: AXUIElement, rect: CGRect)? = nil
+    /// 界面显示「目标使用受限」= 当前有个被额度打断的 Goal
+    var goalLimited = false
+
+    var limitTexts: [String] { limitItems.map { $0.text } }
+    /// 官方横幅存在（界面上有「重置使用量」按钮）
+    var bannerPresent: Bool { !limitAnchorRects.isEmpty }
+    /// 只取与横幅按钮同高（±120px）的文案：对话正文里那条「…或在 22:59后重试」不算，
+    /// 否则历史消息里的旧时间会一直参与「等多久」的计算。
+    var bannerLimitTexts: [String] {
+        guard bannerPresent else { return [] }
+        let anchors = limitAnchorRects
+        return allTexts.filter { item in
+            item.text.count > 3 && anchors.contains { abs($0.midY - item.rect.midY) < 120 }
+        }.map { $0.text }
+    }
 }
 
 /// 单次全树遍历同时收集错误行、「重试」按钮与运行中信号，避免一个周期内多次遍历（AX 属性读取是跨进程 IPC，开销大）
@@ -185,11 +217,17 @@ func scanCodex() -> CodexScan {
                let r = axRect(el), r.height > 5 {
                 s.rows.append(ErrorRow(rect: r))
             }
-            if LIMIT_KEYWORDS.contains(where: { txt.contains($0) }) {
-                // 只认「可见」文案：虚拟化列表里滚出屏幕的历史行 rect 高度为 1，
-                // 会把几条对话里出现过的「使用上限」永远算成当前状态（实际误判来源）。
-                if let r = axRect(el), r.height >= 8, r.width >= 40 {
-                    s.limitTexts.append(raw)
+            let isLimitKw = LIMIT_KEYWORDS.contains(where: { txt.contains($0) })
+            // 可能含「重置时间」的文本（有数字 + 冒号，或命中上限关键字）才去读坐标：
+            // 读 rect 是跨进程 IPC，对所有文本都读会让打字变卡
+            let maybeReset = raw.contains(":") && raw.contains(where: { $0.isNumber })
+            // 只认「可见」文案：虚拟化列表里滚出屏幕的历史行 rect 高度为 1，
+            // 会把几条对话里出现过的「使用上限」永远算成当前状态（实际误判来源）。
+            if !raw.isEmpty, raw.count <= 400, (maybeReset || isLimitKw),
+               let r = axRect(el), r.height >= 8, r.width >= 40 {
+                s.allTexts.append((raw, r))
+                if isLimitKw {
+                    s.limitItems.append((raw, r))
                     if STRONG_LIMIT_KEYWORDS.contains(where: { txt.contains($0) }) { s.strongLimit = true }
                 }
             }
@@ -201,6 +239,18 @@ func scanCodex() -> CodexScan {
                 s.busy = true
             } else if SCROLL_BOTTOM_TITLES.contains(t), s.scrollBtn == nil {
                 s.scrollBtn = el
+            }
+            // 「重置使用量」只出现在官方额度横幅上：它既是「额度耗尽」的硬证据，
+            // 也是定位横幅文案的锚点（横幅上的重置时间解析只认这一带的文本）
+            if RESET_USAGE_TITLES.contains(t) {
+                s.limitAnchorRects.append(r)
+            }
+            if RESUME_GOAL_TITLES.contains(t) {
+                s.resumeGoal = (el, r)
+            }
+            let tl = t.lowercased()
+            if GOAL_LIMITED_KEYWORDS.contains(where: { tl.contains($0) }) {
+                s.goalLimited = true
             }
         }
         if let kids = axAttr(el, kAXChildrenAttribute) as? [AXUIElement] {
@@ -389,6 +439,23 @@ func regexLast(_ pattern: String, _ s: String) -> [String]? {
     return (1..<m.numberOfRanges).map { m.range(at: $0).location == NSNotFound ? "" : ns.substring(with: m.range(at: $0)) }
 }
 
+/// 只有时间、没有日期时判定归属日：算出来的时间点比现在早 12 小时以上 → 视为次日。
+/// （23:00 看到「将于 09:00 重置」指的必然是明天 09:00，不是今天早上）
+func resolveBareTime(hour: Int, minute: Int) -> Date? {
+    let cal = Calendar.current
+    let now = Date()
+    var c = DateComponents()
+    c.year = cal.component(.year, from: now)
+    c.month = cal.component(.month, from: now)
+    c.day = cal.component(.day, from: now)
+    c.hour = hour; c.minute = minute
+    guard let d = cal.date(from: c) else { return nil }
+    if d.timeIntervalSince(now) < -12 * 3600 {
+        return cal.date(byAdding: .day, value: 1, to: d)
+    }
+    return d
+}
+
 /// 从「用量上限」文案解析额度重置时间（取最后一条匹配 = 最新的提示）：
 /// 中文「在 2026年10月25日 00:14后重试」「将于 10月25日 0:14 重置」；
 /// 英文「will reset at 4:00 PM」。解析失败返回 nil。
@@ -412,11 +479,18 @@ func parseLimitResetText(_ raw: String) -> Date? {
         let pm = g[2].uppercased() == "P"
         if pm, h < 12 { h += 12 }
         if !pm, h == 12 { h = 0 }
-        c.year = cal.component(.year, from: now)
-        c.month = cal.component(.month, from: now)
-        c.day = cal.component(.day, from: now)
-        c.hour = h; c.minute = Int(g[1]) ?? 0
-        return cal.date(from: c)
+        return resolveBareTime(hour: h, minute: Int(g[1]) ?? 0)
+    }
+    // ── 只有时间、没有日期 ──
+    // 中文官方横幅：「你的速率限制将于 22:59 重置」/「或在 22:59后重试」
+    if let g = regexLast("(\\d{1,2})[:：](\\d{2})\\s*(?:后)?\\s*(?:重置|重试|恢复)", s), g.count == 2,
+       let h = Int(g[0]), let mi = Int(g[1]), h < 24, mi < 60 {
+        return resolveBareTime(hour: h, minute: mi)
+    }
+    // 英文横幅：「resets at 22:59」/「reset at 3:00 (24h)」
+    if let g = regexLast("reset[s]?\\s*(?:at|around)\\s*(\\d{1,2}):(\\d{2})(?!\\s*[APap])", s), g.count == 2,
+       let h = Int(g[0]), let mi = Int(g[1]), h < 24, mi < 60 {
+        return resolveBareTime(hour: h, minute: mi)
     }
     return nil
 }
@@ -761,6 +835,40 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
                     } else {
                         line = "🧪 自检 \(label)：截图失败 \(r.error ?? "未知")"
                     }
+                    self.appendLog(line)
+                    print(line)
+                }
+                exit(0)
+            }
+            return
+        }
+        // 额度判定自检（调试用）：CR_LIMIT_SELFTEST=1 时扫一次界面，把「看到了哪些上限文案、
+        // 横幅在哪、解析出的重置时间」全部写出来后退出。用户报「额度没恢复却一直点/一直发」时用它定位。
+        if ProcessInfo.processInfo.environment["CR_LIMIT_SELFTEST"] == "1"
+            || FileManager.default.fileExists(atPath: appSupportDir.appendingPathComponent("limit-selftest.flag").path) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                guard let self else { exit(0) }
+                let s = scanCodex()
+                var out: [String] = []
+                out.append("🧪 额度自检：上限文案 \(s.limitItems.count) 条｜横幅按钮 \(s.limitAnchorRects.count) 个｜强信号 \(s.strongLimit ? "是" : "否")｜重试按钮 \(s.buttons.count) 个｜错误行 \(s.rows.count) 条")
+                out.append("🧪 恢复入口：目标受限 \(s.goalLimited ? "是" : "否")｜「恢复目标」按钮 \(s.resumeGoal.map { "有（x=\(Int($0.rect.midX)) y=\(Int($0.rect.midY))）" } ?? "无")｜运行中 \(s.busy ? "是" : "否")")
+                for it in s.limitItems {
+                    out.append("   · y=\(Int(it.rect.midY)) h=\(Int(it.rect.height)) \(it.text)")
+                }
+                out.append("🧪 横幅文案 \(s.bannerLimitTexts.count) 条")
+                let src = s.bannerLimitTexts.isEmpty ? s.limitTexts : s.bannerLimitTexts
+                let parsed = src.compactMap(parseLimitResetText)
+                out.append("🧪 解析出的重置时间：\(parsed.isEmpty ? "无" : parsed.map { fmtMDHM($0) }.joined(separator: ", "))")
+                if let future = parsed.filter({ $0 > Date() }).max() {
+                    out.append("🧪 判定：等到 \(fmtMDHM(future)) 再试（剩余 \(Int(future.timeIntervalSinceNow / 60)) 分钟）")
+                } else if let past = parsed.filter({ $0 <= Date() }).max() {
+                    let gap = Int(Date().timeIntervalSince(past) / 60)
+                    out.append(gap < 5 ? "🧪 判定：横幅时间刚过 \(gap) 分钟 → 试一次"
+                                       : "🧪 判定：横幅时间已过 \(gap) 分钟 → 探测退避 5/10/15/30 分钟")
+                } else {
+                    out.append("🧪 判定：解析不到重置时间 → 探测退避 5/10/15/30 分钟")
+                }
+                for line in out {
                     self.appendLog(line)
                     print(line)
                 }
@@ -1826,11 +1934,13 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
         var idleSendIdx = 0
         var postSendHoldUntil: Double? = nil // 发送间隔保护：上一行发出后，下一行至少间隔 max(空闲分钟, 5) 分钟，
                                              // 防止「运行中停止按钮未被识别为 busy」时任务没跑完就发下一条
-        var limitRowsCount = -1              // 「用量上限」文本条数上次值：条数变化才重置稳定计时
-        var limitStableSince: Date? = nil    // 上限文本稳定计时：解析不出重置时间且稳定 10 分钟 → 视为残留历史文案
         var limitWasActive = false           // 上一轮是否处于上限状态：「已解除」日志只打一次
         var limitHintAt = Date.distantPast   // 上限提示节流
-        var limitWeakStreak = 0              // 弱信号（仅「使用上限」字样）连续命中的轮数：≥2 才判定
+        var limitProbeLevel = 0              // 没有明确重置时间时的探测退避档位（5/10/15/30 分钟）
+        var sendFailStreak = 0               // 空闲发送连续「unclear」次数：Codex 拒收 = 额度没恢复的硬证据
+        var sendProbeUntil = 0.0             // 连续发送失败后的退避截止时刻（nowTick 口径）
+        var goalAutoResumeDone = false       // 本次运行内是否已尝试「恢复目标」（只试一次）
+        var lastResumeAt = Date.distantPast  // 上次「恢复目标 / 发继续」的时间：5 分钟内不重复（防额度抖动时连点连发）
         var limitIgnoreHintAt = Date.distantPast // 「命中上限字样但不算限额」提示的节流
 
         while running && Date() < deadline {
@@ -1883,65 +1993,142 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
             let isIdle = rows.isEmpty && scan.buttons.isEmpty && !scan.busy
             if !isIdle && !residualIdle { idleSince = nil; idleBaseline = nil }
             // ── 用量上限（套餐额度用完）：点重试无效，暂停点击与空闲发送，等额度重置 ──
-            // 判据分强弱两档，避免把对话正文里的「您已达到使用上限」当成真限额而让监控停摆：
-            //   强信号 = 官方横幅专属措辞（STRONG_LIMIT_KEYWORDS，含重置时间那句话）→ 立即判定；
-            //   弱信号 = 只出现「使用上限 / usage limit」字样 → 必须同时满足：无「重试」按钮、
-            //            屏幕上没有可见的 at capacity 错误行、连续 2 轮（约 20s）都在。
-            // 解析出重置时间就等到重置；解析不出最多等 10 分钟（之后按残留文案处理，避免卡死）。
+            // 判据只认「官方横幅」这一档，不做模糊匹配：
+            //   ① 界面上有「重置使用量」按钮（这个按钮只出现在额度横幅上，实测可靠）；
+            //   ② 或命中横幅专属措辞（速率限制将于 / 和工作使用额度已用完 / codex and work usage…）。
+            // 对话正文里的「你已达到使用上限…升级套餐或充值额度…或在 22:59后重试」是历史消息，
+            // 一律不算 —— 之前按「连续 2 轮」判定，界面一滚动就读不到、文案一抖动就误报「已解除」，
+            // 2026-10-31 晚上就是这么停摆的。宁可漏判（还有下面的发送退避兜底），绝不误判。
+            // 重置时间：只取横幅那一带的文案（与「重置使用量」按钮同高 ±120px）。
+            // 等待策略：拿到未来时间就睡到点，期间绝不尝试；没有未来时间就 5/10/15/30 分钟探测一次。
             // 开关关闭时整段跳过，恢复旧行为（可能误判空闲、白发指令）。
-            if scan.limitTexts.count != limitRowsCount {
-                limitRowsCount = scan.limitTexts.count
-                limitStableSince = Date()
+            let bannerTexts = scan.bannerLimitTexts
+            let resetSource = bannerTexts.isEmpty ? scan.limitTexts : bannerTexts
+            let parsedResets = resetSource.compactMap(parseLimitResetText)
+            let limitResetFuture = parsedResets.filter { $0 > Date() }.max()
+            let limitResetPast = parsedResets.filter { $0 <= Date() }.max()
+            // 横幅给的重置时间刚过 5 分钟内 = 额度应该刚恢复：退出暂停，去试一次（失败会被退回退避）
+            let justReset = limitResetPast.map { Date().timeIntervalSince($0) < 300 } ?? false
+            let limitStrong = scan.bannerPresent || scan.strongLimit
+            let limitActive = limitPause && scan.buttons.isEmpty && !justReset && limitStrong
+            // 目标条消失（已恢复/已清除）→ 允许下次再自动恢复一次
+            if !scan.goalLimited, goalAutoResumeDone { goalAutoResumeDone = false }
+            // 会话被额度打断后停在「目标使用受限」：只要额度横幅已经不在（= 额度已恢复），
+            // 就点一次「恢复目标」把它接上，不必等 15 分钟窗口慢慢确认。
+            // 每次运行只试一次，且你不在操作 Codex、它没在跑任务时才动。
+            if !scan.bannerPresent, !goalAutoResumeDone, !scan.busy,
+               !userActiveInCodex(codex), scan.goalLimited, let btn = scan.resumeGoal,
+               Date().timeIntervalSince(lastResumeAt) > 300 {
+                goalAutoResumeDone = true
+                lastResumeAt = Date()
+                if AXUIElementPerformAction(btn.el, kAXPressAction as CFString) == .success {
+                    _ = clicksInc()
+                    appendLog(L("▶️ Quota looks restored; pressed \"Resume goal\" so the interrupted goal continues",
+                                "▶️ 额度看起来已恢复，已点「恢复目标」让被打断的目标继续"))
+                } else {
+                    clickGlobally(CGPoint(x: btn.rect.midX, y: btn.rect.midY))
+                    _ = clicksInc()
+                    appendLog(L("▶️ Quota looks restored; clicked \"Resume goal\" by coordinate",
+                                "▶️ 额度看起来已恢复，已坐标点击「恢复目标」"))
+                }
+                sleepSec(2)
             }
-            let limitStable = limitStableSince.map { Date().timeIntervalSince($0) >= 600 } ?? false
-            // 多条上限文案（含历史）时优先取未来的最大重置时间，不依赖 AX 树遍历顺序；
-            // 全部在过去则取最后一条的解析结果（= 已过期 → 不算激活，按残留文案处理）
-            let limitReset: Date? = {
-                let parsed = scan.limitTexts.compactMap(parseLimitResetText)
-                if let future = parsed.filter({ $0 > Date() }).max() { return future }
-                return parsed.last
-            }()
-            let limitFuture = limitReset.map { Date() < $0 } ?? false
-            // 弱信号的前提：没重试按钮、屏幕上看不到 at capacity 错误行（两者同时出现 = 模型瞬时容量问题）
-            let limitWeakCandidate = !scan.limitTexts.isEmpty && scan.buttons.isEmpty && rows.isEmpty
-            if limitWeakCandidate { limitWeakStreak += 1 } else { limitWeakStreak = 0 }
-            let limitActive = limitPause && scan.buttons.isEmpty && (
-                scan.strongLimit
-                || (limitWeakStreak >= 2 && (limitFuture || !limitStable))
-            )
             // 命中了上限字样却没判定为限额：说清原因，免得日志看起来像「上限被忽略」
-            if limitPause, !scan.limitTexts.isEmpty, !limitActive, !limitWasActive,
+            if limitPause, !scan.limitItems.isEmpty, !limitActive, !limitWasActive,
                Date().timeIntervalSince(limitIgnoreHintAt) > 300 {
                 limitIgnoreHintAt = Date()
                 let why: String
-                if !scan.buttons.isEmpty { why = L("a \"Retry\" button is present → transient model capacity error",
-                                                   "界面上有「重试」按钮 → 按 at capacity 瞬时错误处理") }
+                if justReset { why = L("the banner's reset time just passed → trying once", "横幅上的重置时间刚过 → 先试一次") }
+                else if !scan.buttons.isEmpty { why = L("a \"Retry\" button is present → transient model capacity error",
+                                                        "界面上有「重试」按钮 → 按 at capacity 瞬时错误处理") }
                 else if !rows.isEmpty { why = L("an at-capacity error line is visible → transient model capacity error",
                                                 "屏幕上有 at capacity 错误行 → 按瞬时错误处理") }
-                else { why = L("not confirmed in 2 consecutive scans yet", "尚未连续 2 轮确认") }
+                else { why = L("it's just a leftover line in the chat, not the official banner",
+                               "它只是对话里的一条历史文案，不是官方额度横幅") }
                 appendLog(L("ℹ️ Found text containing \"usage limit\" but \(why); not pausing",
                             "ℹ️ 检测到含「使用上限」的字样，但\(why)，不按额度耗尽处理"))
             }
             if limitActive {
                 if !limitWasActive {
                     limitWasActive = true
-                    let until = limitReset.map { "，预计 " + fmtMDHM($0) + " 重置" } ?? ""
-                    let weakTag = scan.strongLimit ? "" : "（连续 2 轮确认）"
-                    appendLog(L("⏸ Usage limit reached; retry clicks and idle auto-send paused until the quota resets\(until). Won't press \"Reset usage\" — that one-time reset is yours to spend",
-                                "⏸ 用量已达上限\(weakTag)，暂停重试与空闲发送，等额度重置\(until)后自动恢复。不会代点「重置使用量」（一次性机会留给你）"))
+                    let until = limitResetFuture.map { "，界面显示 " + fmtMDHM($0) + " 重置" }
+                        ?? limitResetPast.map { "，界面显示的重置时间 " + fmtMDHM($0) + " 已过" }
+                        ?? ""
+                    appendLog(L("⏸ Usage limit reached\(until); retry clicks and idle auto-send paused until the quota resets. Won't press \"Reset usage\" — that one-time reset is yours to spend",
+                                "⏸ 用量已达上限\(until)，暂停重试与空闲发送，等额度重置后自动恢复。不会代点「重置使用量」（一次性机会留给你）"))
                 } else if Date().timeIntervalSince(limitHintAt) > 600 {
-                    appendLog(L("⏸ Still usage-limited; waiting for quota reset", "⏸ 仍处于用量上限状态，继续等待额度重置"))
+                    let eta = limitResetFuture.map { "，界面显示 " + fmtMDHM($0) + " 重置" } ?? ""
+                    appendLog(L("⏸ Still usage-limited; waiting for quota reset\(eta)", "⏸ 仍处于用量上限状态，继续等待额度重置\(eta)"))
                 }
                 limitHintAt = Date()
                 idleSince = nil; idleBaseline = nil
                 lastErrorAt = Date() // 等待重置期间不算「无错误」，避免触发「10 分钟无错误自动停止」
-                sleepSec(interval)
+                if let until = limitResetFuture {
+                    // 界面给了明确重置时间：睡到点。每 2 分钟醒一次重新扫描（横幅可能被刷新/时间被改写）
+                    limitProbeLevel = 0
+                    let remain = until.timeIntervalSinceNow
+                    sleepSec(min(max(remain, 5), 120))
+                } else {
+                    // 没有可用的未来时间（解析不出，或横幅给的时间已过）：退避探测，别每 20 秒空转
+                    let ladder: [TimeInterval] = [300, 600, 900, 1800]
+                    let wait = ladder[min(limitProbeLevel, ladder.count - 1)]
+                    limitProbeLevel += 1
+                    if limitProbeLevel == 1 {
+                        appendLog(L("⏸ No usable reset time in the banner; probing again in \(Int(wait / 60)) min (backoff up to 30 min)",
+                                    "⏸ 横幅里没有可用的重置时间，\(Int(wait / 60)) 分钟后再探（退避最长 30 分钟）"))
+                    }
+                    sleepSec(wait)
+                }
                 continue
             }
             if limitWasActive {
                 limitWasActive = false
-                limitWeakStreak = 0
+                limitProbeLevel = 0
                 appendLog(L("✅ Usage limit cleared; resuming normal monitoring", "✅ 额度上限已解除，恢复正常监控"))
+                // 额度恢复后把被打断的会话接上（跟随「用量上限时暂停」开关）：
+                //   1) 界面上有「恢复目标」→ 点它，从原目标继续（不改会话意图，最准）
+                //   2) 没有目标条 → 输入框发「继续」（框里有草稿则跳过，绝不覆盖）
+                // 你不操作 Codex 且它没在跑任务时才动手，避免打断你或覆盖草稿。
+                if limitPause, !scan.busy, !userActiveInCodex(codex), !goalAutoResumeDone,
+                   Date().timeIntervalSince(lastResumeAt) > 300 {
+                    lastResumeAt = Date()
+                    if let btn = scan.resumeGoal {
+                        goalAutoResumeDone = true
+                        if AXUIElementPerformAction(btn.el, kAXPressAction as CFString) == .success {
+                            _ = clicksInc()
+                            appendLog(L("▶️ Pressed \"Resume goal\" — the goal interrupted by the usage limit continues",
+                                        "▶️ 已点「恢复目标」，被额度中断的目标会话继续执行"))
+                        } else {
+                            clickGlobally(CGPoint(x: btn.rect.midX, y: btn.rect.midY))
+                            _ = clicksInc()
+                            appendLog(L("▶️ Accessibility press failed; clicked \"Resume goal\" by coordinate",
+                                        "▶️ 无障碍按压「恢复目标」失败，已改用坐标点击"))
+                        }
+                        sleepSec(2)
+                    } else {
+                        switch nativeSendLine("继续") {
+                        case "sent":
+                            // 发完 Codex 就该跑起来了；仍留 5 分钟保护，避免 busy 识别慢时立刻又发脚本下一行
+                            postSendHoldUntil = nowTick() + 300
+                            sendFailStreak = 0
+                            sendProbeUntil = 0
+                            appendLog(L("▶️ Quota is back; sent \"继续\" to resume the interrupted conversation",
+                                        "▶️ 额度已恢复，已发送「继续」接上被打断的会话"))
+                        case "busy":
+                            appendLog(L("ℹ️ Input box has unsent content; skipped the auto \"继续\" (won't overwrite your draft)",
+                                        "ℹ️ 输入框有未发送内容，跳过自动「继续」（不覆盖你的草稿）"))
+                        case "nofield":
+                            appendLog(L("ℹ️ Input box not found; skipped the auto \"继续\"", "ℹ️ 未找到输入框，跳过自动「继续」"))
+                        default:
+                            // 发不出去 = 额度其实还没恢复：按发送退避，别每轮硬试
+                            sendFailStreak += 1
+                            let ladder: [Double] = [60, 120, 300, 600, 1200, 1800]
+                            sendProbeUntil = nowTick() + ladder[min(sendFailStreak - 1, ladder.count - 1)]
+                            appendLog(L("⚠️ Auto \"继续\" not confirmed — the quota may not be back yet; backing off",
+                                        "⚠️ 自动「继续」未确认成功，额度可能还没真恢复，按退避再试"))
+                        }
+                    }
+                }
             }
             guard let last = rows.map({ $0.rect }).max(by: { $0.minY < $1.minY }), !residualIdle else {
                 // 无错误行：Codex 空闲（无重试按钮、无错误、无运行中任务）
@@ -1974,6 +2161,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
                     } else if baselineChanged {
                         // 基线这轮刚更新：内容是新的，本轮绝不发送（重新计满 N 分钟后再看）
                     } else if idleSec >= idleMin * 60, idleSendIdx < lines.count,
+                              now >= sendProbeUntil,
                               postSendHoldUntil == nil || now >= postSendHoldUntil!,
                               !userActiveInCodex(codex) {
                         let line = lines[idleSendIdx]
@@ -1986,6 +2174,12 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
                             idleSince = now        // 下一行同样要再空闲 N 分钟
                             postSendHoldUntil = now + max(Double(idleMin) * 60, 300) // 发送间隔保护：即使 busy 识别失效，两次发送至少隔 5 分钟
                             idleBaseline = nil     // 发送后框里已是新状态（被清空/换建议），下轮重新采样
+                            if sendFailStreak > 0 || sendProbeUntil > 0 {
+                                sendFailStreak = 0
+                                sendProbeUntil = 0
+                                appendLog(L("✅ Codex accepted input again; send backoff cleared",
+                                            "✅ Codex 已能正常接收输入，发送退避解除"))
+                            }
                             appendLog(L("✅ Idle send done | line \(idleSendIdx)/\(lines.count) sent (cursor untouched)",
                                         "✅ 空闲发送完成｜第 \(idleSendIdx)/\(lines.count) 行已发（光标未动）"))
                         case "busy":
@@ -2004,10 +2198,20 @@ final class Controller: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NS
                                             "ℹ️ 未找到 Codex 输入框，无法发送（60 秒内不重复提示）"))
                             }
                         default:
-                            // 写入失败/未确认：同样 60 秒后重试同一行，行号不推进（不漏发、不重发）
-                            idleSince = now - idleMin * 60 + 60
-                            appendLog(L("⚠️ Idle send not confirmed (\(r)); will retry the same line in ~60s",
-                                        "⚠️ 空闲发送未确认成功（\(r)），约 60 秒后重试同一行"))
+                            // 写入失败/未确认 = Codex 没接受这次输入。额度耗尽时正是这个表现：
+                            // 文字写进去、回车投递了，但内容还留在框里。连续多次就是「额度没恢复」的硬证据，
+                            // 因此按 1→2→5→10→20→30 分钟退避，别每 60 秒空转一次。
+                            sendFailStreak += 1
+                            let ladder: [Double] = [60, 120, 300, 600, 1200, 1800]
+                            let wait = ladder[min(sendFailStreak - 1, ladder.count - 1)]
+                            sendProbeUntil = now + wait
+                            idleSince = now - idleMin * 60 + wait
+                            appendLog(L("⚠️ Idle send not confirmed (\(r)); retry the same line in \(Int(wait / 60 >= 1 ? wait / 60 : 1)) min",
+                                        "⚠️ 空闲发送未确认成功（\(r)），约 \(Int(wait / 60 >= 1 ? wait / 60 : 1)) 分钟后重试同一行"))
+                            if sendFailStreak == 2 {
+                                appendLog(L("⚠️ Codex rejected the input twice in a row — the quota is most likely still exhausted. Backing off (up to 30 min) until it accepts input again",
+                                            "⚠️ Codex 连续 2 次拒收输入，判定额度很可能仍未恢复：进入退避（最长 30 分钟），直到它能接收输入为止"))
+                            }
                         }
                     }
                 }
