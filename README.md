@@ -4,6 +4,12 @@
 
 > **无用到有用，只差每天一点。**
 
+> ⚠️ **本项目已功成身退，停止维护。**
+> OpenAI 已在官方客户端内置 at capacity 自动重试与退避机制（相关错误率从 6.82% 降至 0.085%），本工具的核心痛点已被官方解决。**v1.0.7 为最终版本**，仍可下载使用，感谢每一位用户。
+>
+> **⚠️ This project is archived.**
+> OpenAI has since built capacity retry with backoff into its official clients, solving the very problem this tool existed for. **v1.0.7 is the final release** — downloads below still work. Thank you to everyone who used it.
+
 ### Codex 卡住了？让 RetryPilot 替你点「重试」。
 
 让 Codex 自动应对模型繁忙，告别反复手动重试。  

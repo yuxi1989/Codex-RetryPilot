@@ -310,6 +310,11 @@
 </header>
 
 <main>
+  <div class="wrap" style="padding-top:18px">
+    <div role="note" style="border:1px solid #e2b93b;background:#fdf5dd;border-radius:12px;padding:14px 20px;font-size:14.5px;line-height:1.7;text-align:center;color:#6b5312">
+      <span data-en="<strong>⛔ This project is archived.</strong> OpenAI has built capacity retry with backoff into its official clients, solving the problem this tool existed for. <strong>v1.0.7 is the final release</strong> and remains downloadable below. Thanks for using it."><strong>⛔ 本项目已停止维护。</strong>OpenAI 已在官方客户端内置 at capacity 自动重试与退避，本工具的核心痛点已被官方解决。<strong>v1.0.7 为最终版本</strong>，仍可下载使用，感谢每一位用户。</span>
+    </div>
+  </div>
   <div class="hero wrap">
     <span class="eyebrow"><span class="dot"></span><span id="verBadge" data-en="v1.0.4 · Notarized · MIT License">v1.0.4 · 已公证 · MIT 协议</span></span>
     <h1 data-en="Codex stuck?<br><em>Let it hit Retry itself.</em>">Codex 卡住了？<br><em>让它自己点「重试」。</em></h1>
@@ -609,7 +614,7 @@
   // 版本徽标自动更新：从 GitHub latest release 拉版本号，失败则保留写死的兜底值
   var el = document.getElementById('verBadge');
   if (!el) return;
-  var ver = '1.0.4'; // 兜底版本（发布时随 release.sh 一起更新；正常情况会被下面的 API 覆盖）
+  var ver = '1.0.7'; // 兜底版本（发布时随 release.sh 一起更新；正常情况会被下面的 API 覆盖）
   function suffix(en) { return en ? ' · Notarized · MIT License' : ' · 已公证 · MIT 协议'; }
   function render() {
     var en = document.documentElement.lang === 'en';
